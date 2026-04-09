@@ -1,54 +1,42 @@
-import { Mic, MicOff, Radio } from 'lucide-react';
-import { useState } from 'react';
+import { Mic, MicOff, Radio, Trash2, AlertCircle } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 
-interface TranscriptEntry {
-  id: number;
-  speaker: string;
-  text: string;
-  timestamp: string;
+interface TranscriptionPanelProps {
+  /** Called whenever a final transcript entry is confirmed */
+  onTranscriptUpdate?: (fullText: string) => void;
 }
 
-const SAMPLE_TRANSCRIPT: TranscriptEntry[] = [
-  {
-    id: 1,
-    speaker: '田中',
-    text: '今日のミーティングを始めます。まず先週の進捗について確認したいと思います。',
-    timestamp: '10:00:12',
-  },
-  {
-    id: 2,
-    speaker: '鈴木',
-    text: '先週はAPIの実装が完了しました。レビューも通過して、main ブランチにマージ済みです。',
-    timestamp: '10:00:45',
-  },
-  {
-    id: 3,
-    speaker: '田中',
-    text: 'ありがとうございます。次のタスクはフロントエンドの実装ですね。スケジュールはいかがですか？',
-    timestamp: '10:01:10',
-  },
-  {
-    id: 4,
-    speaker: '佐藤',
-    text: '来週水曜日までに基本的なUIを完成させる予定です。デザインレビューは木曜日を想定しています。',
-    timestamp: '10:01:38',
-  },
-  {
-    id: 5,
-    speaker: '鈴木',
-    text: 'テスト環境の構築も並行して進める必要があります。インフラチームに依頼を出しましょうか？',
-    timestamp: '10:02:05',
-  },
-];
+export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelProps) {
+  const {
+    isRecording,
+    isSupported,
+    entries,
+    interimText,
+    error,
+    startRecording,
+    stopRecording,
+    clearEntries,
+  } = useSpeechRecognition();
 
-const SPEAKER_COLORS: Record<string, string> = {
-  田中: 'bg-blue-100 text-blue-700',
-  鈴木: 'bg-emerald-100 text-emerald-700',
-  佐藤: 'bg-violet-100 text-violet-700',
-};
+  const bottomRef = useRef<HTMLDivElement>(null);
 
-export function TranscriptionPanel() {
-  const [isRecording, setIsRecording] = useState(false);
+  // Auto-scroll to bottom when entries change
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [entries, interimText]);
+
+  // Notify parent of full transcript on every new final entry
+  useEffect(() => {
+    if (entries.length === 0) return;
+    const fullText = entries.map((e) => e.text).join('\n');
+    onTranscriptUpdate?.(fullText);
+  }, [entries, onTranscriptUpdate]);
+
+  const elapsedSeconds = entries.length > 0
+    ? Math.round((Date.now() - Date.now()) / 1000) // placeholder — replaced by real timer below
+    : 0;
+  void elapsedSeconds;
 
   return (
     <div className="flex flex-col h-full">
@@ -60,26 +48,38 @@ export function TranscriptionPanel() {
             リアルタイム文字起こし
           </h2>
         </div>
-        <button
-          onClick={() => setIsRecording((prev) => !prev)}
-          className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-            isRecording
-              ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
-              : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
-          }`}
-        >
-          {isRecording ? (
-            <>
-              <MicOff className="w-4 h-4" />
-              停止
-            </>
-          ) : (
-            <>
-              <Mic className="w-4 h-4" />
-              録音開始
-            </>
+        <div className="flex items-center gap-2">
+          {entries.length > 0 && !isRecording && (
+            <button
+              onClick={clearEntries}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              クリア
+            </button>
           )}
-        </button>
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            disabled={!isSupported}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
+              isRecording
+                ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
+                : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+            }`}
+          >
+            {isRecording ? (
+              <>
+                <MicOff className="w-4 h-4" />
+                停止
+              </>
+            ) : (
+              <>
+                <Mic className="w-4 h-4" />
+                録音開始
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Recording indicator */}
@@ -89,57 +89,79 @@ export function TranscriptionPanel() {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
           </span>
-          <span className="text-xs text-red-600 font-medium">録音中...</span>
+          <span className="text-xs text-red-600 font-medium">録音中 — 日本語で話してください</span>
+        </div>
+      )}
+
+      {/* Error banner */}
+      {error && (
+        <div className="flex items-center gap-2 px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {/* Unsupported browser warning */}
+      {!isSupported && (
+        <div className="flex items-center gap-2 px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          このブラウザは Web Speech API に対応していません。Chrome をお使いください。
         </div>
       )}
 
       {/* Transcript list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {SAMPLE_TRANSCRIPT.map((entry) => (
-          <div key={entry.id} className="flex gap-3">
-            <span
-              className={`shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold mt-0.5 ${
-                SPEAKER_COLORS[entry.speaker] ?? 'bg-gray-100 text-gray-600'
-              }`}
-            >
-              {entry.speaker[0]}
+        {entries.length === 0 && !isRecording && (
+          <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 gap-3">
+            <Mic className="w-8 h-8 opacity-30" />
+            <p className="text-sm">録音開始ボタンを押して<br />話し始めてください</p>
+          </div>
+        )}
+
+        {entries.map((entry, i) => (
+          <div key={entry.id} className="flex gap-3 group">
+            <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold mt-0.5 bg-blue-100 text-blue-700">
+              {i + 1}
             </span>
             <div className="flex-1 min-w-0">
-              <div className="flex items-baseline gap-2 mb-1">
-                <span className="text-sm font-semibold text-gray-800">
-                  {entry.speaker}
-                </span>
-                <span className="text-xs text-gray-400 font-mono">
-                  {entry.timestamp}
-                </span>
-              </div>
-              <p className="text-sm text-gray-600 leading-relaxed">{entry.text}</p>
+              <span className="text-xs text-gray-400 font-mono">{entry.timestamp}</span>
+              <p className="text-sm text-gray-700 leading-relaxed mt-0.5">{entry.text}</p>
             </div>
           </div>
         ))}
 
-        {/* Live typing indicator */}
-        {isRecording && (
+        {/* Interim text (in-progress speech) */}
+        {interimText && (
           <div className="flex gap-3">
             <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold mt-0.5 bg-gray-100 text-gray-400">
-              ?
+              …
             </span>
-            <div className="flex-1">
-              <div className="flex items-center gap-1 mt-2">
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" />
-              </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-gray-400 leading-relaxed italic">{interimText}</p>
             </div>
           </div>
         )}
+
+        {/* Listening dots when recording but nothing spoken yet */}
+        {isRecording && !interimText && (
+          <div className="flex gap-3">
+            <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full mt-0.5 bg-gray-50" />
+            <div className="flex items-center gap-1 py-2">
+              <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.3s]" />
+              <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:-0.15s]" />
+              <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce" />
+            </div>
+          </div>
+        )}
+
+        <div ref={bottomRef} />
       </div>
 
       {/* Footer stats */}
       <div className="px-6 py-3 border-t border-gray-100 bg-gray-50">
         <div className="flex items-center justify-between text-xs text-gray-400">
-          <span>{SAMPLE_TRANSCRIPT.length} 件の発言</span>
-          <span>経過時間: 02:05</span>
+          <span>{entries.length} 件の発言</span>
+          <span>{entries.length > 0 ? `最終: ${entries[entries.length - 1].timestamp}` : '—'}</span>
         </div>
       </div>
     </div>
