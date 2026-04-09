@@ -7,6 +7,7 @@ dist
 # 環境変数ファイル（API キーをイメージに含めないため）
 .env
 .env.*
+*.local
 
 # Git 関連
 .git

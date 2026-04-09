@@ -15,12 +15,17 @@ RUN npm ci
 COPY . .
 
 # Gemini API キーをビルド時引数として受け取る
-# （VITE_ プレフィックスの環境変数は vite build 時にバンドルへ埋め込まれる）
+# （VITE_ プレフィックスの変数は vite build 時に JS バンドルへ埋め込まれる）
+#
+# ⚠️ セキュリティ注意:
+#   ENV ではなく RUN 内でインライン展開することで、
+#   docker history にキーが残らないようにする。
+#   マルチステージビルドのため最終イメージには ENV 層が引き継がれない点も安全性を高める。
+#   ただし VITE_ 変数の性質上、キーは dist/ の JS バンドルに埋め込まれる点は避けられない。
 ARG VITE_GEMINI_API_KEY
-ENV VITE_GEMINI_API_KEY=$VITE_GEMINI_API_KEY
 
-# TypeScript コンパイル + Vite 本番ビルド
-RUN npm run build
+# TypeScript コンパイル + Vite 本番ビルド（ARG をそのまま環境変数として渡す）
+RUN VITE_GEMINI_API_KEY="$VITE_GEMINI_API_KEY" npm run build
 
 # ============================================================
 # ステージ 2: 配信
