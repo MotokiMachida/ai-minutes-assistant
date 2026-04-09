@@ -1,0 +1,13 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        # .env ファイルから VITE_GEMINI_API_KEY を読み込んでビルド引数として渡す
+        # docker compose は同ディレクトリの .env を自動的に読み込む
+        VITE_GEMINI_API_KEY: ${VITE_GEMINI_API_KEY}
+    ports:
+      # ホスト側 8080 → コンテナ内 nginx 80 へマッピング
+      # ブラウザで http://localhost:8080 にアクセスする
+      - "8080:80"
+    restart: unless-stopped

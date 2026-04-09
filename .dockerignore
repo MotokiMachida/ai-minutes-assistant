@@ -1,0 +1,28 @@
+# Docker ビルドコンテキストから除外するファイル
+# これにより docker build が速くなり、不要なファイルがイメージに入らない
+
+node_modules
+dist
+
+# 環境変数ファイル（API キーをイメージに含めないため）
+.env
+.env.*
+
+# Git 関連
+.git
+.gitignore
+
+# エディタ / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# ログ
+*.log
+
+# Claude Code
+.claude
+
+# テスト / 開発用
+coverage

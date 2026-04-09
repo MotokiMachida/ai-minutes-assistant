@@ -39,11 +39,14 @@
 
 ### 前提条件
 
-- Node.js 18 以上
 - Google Gemini API キー（無料取得: https://aistudio.google.com/app/apikey）
 - Chrome ブラウザ（`MediaRecorder API` を使用）
 
-### 手順
+---
+
+### A. ローカル開発（Node.js）
+
+**追加の前提条件:** Node.js 18 以上
 
 ```bash
 # 1. リポジトリをクローン
@@ -55,15 +58,42 @@ npm install
 
 # 3. 環境変数ファイルを作成
 cp .env.example .env.local
+# .env.local を開いて VITE_GEMINI_API_KEY=<APIキー> を設定
 
-# 4. .env.local を編集して API キーを設定
-#    VITE_GEMINI_API_KEY=<取得した API キー>
-
-# 5. 開発サーバーを起動
+# 4. 開発サーバーを起動
 npm run dev
 ```
 
 ブラウザで http://localhost:5173 を開いてください。
+
+---
+
+### B. Docker（どこでも起動）
+
+**追加の前提条件:** Docker Desktop
+
+```bash
+# 1. リポジトリをクローン
+git clone https://github.com/MotokiMachida/ai-minutes-assistant.git
+cd ai-minutes-assistant
+
+# 2. 環境変数ファイルを作成（docker compose が .env を自動で読み込む）
+cp .env.example .env
+# .env を開いて VITE_GEMINI_API_KEY=<APIキー> を設定
+
+# 3. ビルド & 起動
+docker compose up --build
+```
+
+ブラウザで http://localhost:8080 を開いてください。
+
+```bash
+# 停止
+docker compose down
+
+# バックグラウンドで起動したい場合
+docker compose up --build -d
+```
 
 ---
 
