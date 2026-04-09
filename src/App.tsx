@@ -1,8 +1,16 @@
+import { useState, useCallback } from 'react';
 import { FileText, Clock, Users, Settings } from 'lucide-react';
 import { TranscriptionPanel } from './components/TranscriptionPanel';
 import { AnalysisPanel } from './components/AnalysisPanel';
 
 function App() {
+  // Transcript text flows left → right for AI analysis
+  const [transcriptText, setTranscriptText] = useState('');
+
+  const handleTranscriptUpdate = useCallback((text: string) => {
+    setTranscriptText(text);
+  }, []);
+
   return (
     <div className="h-screen flex flex-col bg-gray-50 font-sans">
       {/* Top Navigation */}
@@ -43,12 +51,12 @@ function App() {
       <main className="flex-1 flex overflow-hidden">
         {/* Left: Real-time Transcription */}
         <section className="flex-1 flex flex-col min-w-0 bg-white border-r border-gray-200">
-          <TranscriptionPanel />
+          <TranscriptionPanel onTranscriptUpdate={handleTranscriptUpdate} />
         </section>
 
         {/* Right: AI Analysis */}
         <section className="w-96 flex-shrink-0 flex flex-col bg-white xl:w-[420px]">
-          <AnalysisPanel />
+          <AnalysisPanel transcriptText={transcriptText} />
         </section>
       </main>
     </div>

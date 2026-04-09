@@ -65,7 +65,12 @@ const DECISIONS: DecisionItem[] = [
 
 type SectionKey = 'summary' | 'todos' | 'decisions';
 
-export function AnalysisPanel() {
+interface AnalysisPanelProps {
+  /** Full transcript text passed from TranscriptionPanel (used in AI analysis branch) */
+  transcriptText?: string;
+}
+
+export function AnalysisPanel({ transcriptText: _transcriptText }: AnalysisPanelProps) {
   const [open, setOpen] = useState<Record<SectionKey, boolean>>({
     summary: true,
     todos: true,
