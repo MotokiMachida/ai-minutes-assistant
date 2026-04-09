@@ -10,6 +10,11 @@ function App() {
   const handleTranscriptUpdate = useCallback((text: string) => {
     setTranscriptText(text);
   }, []);
+// 1. 変数名を修正 (meetingInfo) し、初期値を設定
+  const [meetingInfo, setMeetingInfo] = useState({
+    title: "週次定例ミーティング",
+    participants: 5
+  });
 
   return (
     <div className="h-screen flex flex-col bg-gray-50 font-sans">
@@ -28,22 +33,30 @@ function App() {
             </p>
           </div>
         </div>
-
+        {/* 2. 真ん中〜右側の表示エリアを汎用的に修正 */}
+        <div className="flex items-center gap-6">
+          {/* タイトル入力欄 */}
+          <input 
+            type="text" 
+            value={meetingInfo.title}
+            onChange={(e) => setMeetingInfo({ ...meetingInfo, title: e.target.value })}
+            className="text-sm font-semibold text-right bg-transparent border-none focus:outline-none focus:ring-1 focus:ring-blue-200 rounded px-2 py-1 w-64 text-gray-700"
+            placeholder="会議名を入力..."
+          />
         <div className="flex items-center gap-4">
           <div className="hidden md:flex items-center gap-4 text-xs text-gray-500">
             <span className="flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5" />
-              週次定例ミーティング
             </span>
             <span className="flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5" />
-              3名参加
             </span>
           </div>
           <div className="hidden md:block w-px h-5 bg-gray-200" />
           <button className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <Settings className="w-4 h-4" />
           </button>
+        </div>
         </div>
       </header>
 
