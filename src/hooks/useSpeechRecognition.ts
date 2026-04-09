@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { transcribeAudio } from '../services/gemini';
 
 export interface TranscriptEntry {
   id: number;
@@ -13,10 +14,15 @@ interface UseSpeechRecognitionReturn {
   entries: TranscriptEntry[];
   interimText: string;
   error: string | null;
+  /** Non-null while a segment is being transcribed by Gemini */
+  retryWarning: string | null;
   startRecording: () => void;
   stopRecording: () => void;
   clearEntries: () => void;
 }
+
+/** Duration of each audio segment sent to Gemini (ms) */
+const SEGMENT_MS = 5000;
 
 function getTimestamp(): string {
   return new Date().toLocaleTimeString('ja-JP', {
@@ -26,106 +32,137 @@ function getTimestamp(): string {
   });
 }
 
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      resolve(result.split(',')[1]); // strip "data:...;base64,"
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/** Record exactly `durationMs` of audio, then resolve with the Blob.
+ *  Resolves with null if the signal is aborted before recording ends. */
+function recordSegment(
+  stream: MediaStream,
+  durationMs: number,
+  signal: AbortSignal,
+): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const chunks: BlobPart[] = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      resolve(signal.aborted ? null : new Blob(chunks, { type: recorder.mimeType }));
+    };
+
+    recorder.start();
+
+    const timer = setTimeout(() => {
+      if (recorder.state === 'recording') recorder.stop();
+    }, durationMs);
+
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      if (recorder.state === 'recording') recorder.stop();
+    });
+  });
+}
+
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
-  const [interimText, setInterimText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [retryWarning, setRetryWarning] = useState<string | null>(null);
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const entryIdRef = useRef(0);
-  // Keep a ref to avoid stale closure in onresult
   const isRecordingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const isSupported =
     typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+    typeof MediaRecorder !== 'undefined' &&
+    !!navigator.mediaDevices?.getUserMedia;
 
-  const buildRecognition = useCallback((): SpeechRecognition => {
-    const SpeechRecognitionImpl =
-      window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognitionImpl();
-
-    recognition.lang = 'ja-JP';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      isRecordingRef.current = true;
-      setError(null);
-    };
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let interim = '';
-
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const result = event.results[i];
-        const transcript = result[0].transcript.trim();
-
-        if (result.isFinal) {
-          if (transcript.length === 0) continue;
-          setEntries((prev) => [
-            ...prev,
-            {
-              id: ++entryIdRef.current,
-              text: transcript,
-              timestamp: getTimestamp(),
-              isFinal: true,
-            },
-          ]);
-          setInterimText('');
-        } else {
-          interim += transcript;
-        }
-      }
-
-      if (interim) setInterimText(interim);
-    };
-
-    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === 'no-speech') return; // suppress noise
-      if (event.error === 'aborted') return;    // intentional stop
-      setError(`音声認識エラー: ${event.error}`);
-      setIsRecording(false);
-      isRecordingRef.current = false;
-    };
-
-    recognition.onend = () => {
-      // Auto-restart if user hasn't stopped manually
-      if (isRecordingRef.current) {
-        try {
-          recognition.start();
-        } catch {
-          // Already started — ignore
-        }
-      } else {
-        setIsRecording(false);
-        setInterimText('');
-      }
-    };
-
-    return recognition;
-  }, []);
-
-  const startRecording = useCallback(() => {
+  const startRecording = useCallback(async () => {
     if (!isSupported) {
-      setError('このブラウザは Web Speech API に対応していません。Chrome をお使いください。');
+      setError('このブラウザはマイク録音に対応していません。Chrome をお使いください。');
       return;
     }
     if (isRecordingRef.current) return;
 
-    const recognition = buildRecognition();
-    recognitionRef.current = recognition;
-    recognition.start();
-  }, [isSupported, buildRecognition]);
+    // Request microphone access
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setError('マイクへのアクセスが拒否されました。ブラウザの設定を確認してください。');
+      return;
+    }
+
+    streamRef.current = stream;
+    setError(null);
+    setRetryWarning(null);
+    isRecordingRef.current = true;
+    setIsRecording(true);
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    // Recording loop: record → transcribe → repeat
+    (async () => {
+      while (isRecordingRef.current) {
+        const blob = await recordSegment(stream, SEGMENT_MS, abortController.signal);
+
+        if (!blob || blob.size < 500) continue; // skip empty/near-silent blobs
+
+        setRetryWarning('音声を解析中...');
+        try {
+          const base64 = await blobToBase64(blob);
+          const text = await transcribeAudio(base64, blob.type);
+
+          if (text) {
+            setEntries((prev) => [
+              ...prev,
+              {
+                id: ++entryIdRef.current,
+                text,
+                timestamp: getTimestamp(),
+                isFinal: true,
+              },
+            ]);
+          }
+        } catch (err) {
+          if (isRecordingRef.current) {
+            console.warn('Gemini transcription error:', err);
+          }
+        } finally {
+          setRetryWarning(null);
+        }
+      }
+    })();
+  }, [isSupported]);
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false;
-    recognitionRef.current?.stop();
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
     setIsRecording(false);
-    setInterimText('');
+    setRetryWarning(null);
   }, []);
 
   const clearEntries = useCallback(() => {
@@ -133,11 +170,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     entryIdRef.current = 0;
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       isRecordingRef.current = false;
-      recognitionRef.current?.abort();
+      abortControllerRef.current?.abort();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, []);
 
@@ -145,8 +182,9 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     isRecording,
     isSupported,
     entries,
-    interimText,
+    interimText: '',   // Gemini方式はストリーミングなし、代わりに retryWarning で状態表示
     error,
+    retryWarning,
     startRecording,
     stopRecording,
     clearEntries,
