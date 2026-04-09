@@ -52,6 +52,29 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
+export async function transcribeAudio(audioBase64: string, mimeType: string): Promise<string> {
+  const ai = getClient();
+  // Strip codec suffix (e.g. "audio/webm;codecs=opus" → "audio/webm") for Gemini compatibility
+  const baseMime = mimeType.split(';')[0];
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.0-flash',
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: baseMime, data: audioBase64 } },
+          {
+            text: 'この音声を日本語で正確に文字起こしししてください。話された日本語の内容のみを返してください。音声がない・無音・聞き取れない場合は必ず空文字のみを返してください。余計な説明や補足は不要です。',
+          },
+        ],
+      },
+    ],
+  });
+
+  return (response.text ?? '').trim();
+}
+
 export async function analyzeTranscript(transcriptText: string): Promise<AnalysisResult> {
   const ai = getClient();
 

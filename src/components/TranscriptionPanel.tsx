@@ -96,7 +96,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
 
       {/* Retry warning (transient network issue) */}
       {retryWarning && (
-        <div className="flex items-center gap-2 px-6 py-2 bg-yellow-50 border-b border-yellow-100 text-xs text-yellow-700">
+        <div className="flex items-center gap-2 px-6 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
           <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
           {retryWarning}
         </div>
@@ -114,7 +114,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
       {!isSupported && (
         <div className="flex items-center gap-2 px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          このブラウザは Web Speech API に対応していません。Chrome をお使いください。
+          このブラウザはマイク録音に対応していません。Chrome をお使いください。
         </div>
       )}
 

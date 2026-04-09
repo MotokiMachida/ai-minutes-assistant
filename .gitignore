@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code local settings
+.claude/
+
+# Misc local files
+er.email
