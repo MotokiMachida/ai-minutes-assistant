@@ -1,4 +1,4 @@
-import { Mic, MicOff, Radio, Trash2, AlertCircle } from 'lucide-react';
+import { Mic, MicOff, Radio, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 
@@ -14,6 +14,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
     entries,
     interimText,
     error,
+    retryWarning,
     startRecording,
     stopRecording,
     clearEntries,
@@ -93,9 +94,17 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
         </div>
       )}
 
-      {/* Error banner */}
+      {/* Retry warning (transient network issue) */}
+      {retryWarning && (
+        <div className="flex items-center gap-2 px-6 py-2 bg-yellow-50 border-b border-yellow-100 text-xs text-yellow-700">
+          <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
+          {retryWarning}
+        </div>
+      )}
+
+      {/* Fatal error banner */}
       {error && (
-        <div className="flex items-center gap-2 px-6 py-2 bg-amber-50 border-b border-amber-100 text-xs text-amber-700">
+        <div className="flex items-center gap-2 px-6 py-2 bg-red-50 border-b border-red-100 text-xs text-red-700">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           {error}
         </div>

@@ -12,11 +12,21 @@ interface UseSpeechRecognitionReturn {
   isSupported: boolean;
   entries: TranscriptEntry[];
   interimText: string;
+  /** Non-null when a fatal (non-retryable) error occurred */
   error: string | null;
+  /** Non-null while a transient error is being retried */
+  retryWarning: string | null;
   startRecording: () => void;
   stopRecording: () => void;
   clearEntries: () => void;
 }
+
+/** Errors that are transient — safe to retry automatically */
+const RETRYABLE_ERRORS = new Set(['network', 'service-not-allowed']);
+/** Errors we silently ignore */
+const SILENT_ERRORS = new Set(['no-speech', 'aborted']);
+/** Give up after this many consecutive retryable errors */
+const MAX_RETRIES = 5;
 
 function getTimestamp(): string {
   return new Date().toLocaleTimeString('ja-JP', {
@@ -31,17 +41,19 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [interimText, setInterimText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [retryWarning, setRetryWarning] = useState<string | null>(null);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const entryIdRef = useRef(0);
-  // Keep a ref to avoid stale closure in onresult
   const isRecordingRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSupported =
     typeof window !== 'undefined' &&
     ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
 
-  const buildRecognition = useCallback((): SpeechRecognition => {
+  const startInstance = useCallback(() => {
     const SpeechRecognitionImpl =
       window.SpeechRecognition ?? window.webkitSpeechRecognition;
     const recognition = new SpeechRecognitionImpl();
@@ -53,19 +65,19 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
     recognition.onstart = () => {
       setIsRecording(true);
-      isRecordingRef.current = true;
       setError(null);
+      // Clear retry warning once we successfully start
+      setRetryWarning(null);
+      retryCountRef.current = 0;
     };
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = '';
-
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0].transcript.trim();
-
         if (result.isFinal) {
-          if (transcript.length === 0) continue;
+          if (!transcript) continue;
           setEntries((prev) => [
             ...prev,
             {
@@ -80,30 +92,58 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
           interim += transcript;
         }
       }
-
       if (interim) setInterimText(interim);
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      if (event.error === 'no-speech') return; // suppress noise
-      if (event.error === 'aborted') return;    // intentional stop
+      if (SILENT_ERRORS.has(event.error)) return;
+
+      if (RETRYABLE_ERRORS.has(event.error)) {
+        // Keep isRecordingRef true so onend will attempt restart
+        retryCountRef.current += 1;
+        if (retryCountRef.current <= MAX_RETRIES) {
+          setRetryWarning(
+            `ネットワーク接続を確認しています... (${retryCountRef.current}/${MAX_RETRIES})`
+          );
+        } else {
+          // Give up
+          isRecordingRef.current = false;
+          setError(
+            'ネットワークエラーが続いています。インターネット接続を確認して再度お試しください。'
+          );
+          setRetryWarning(null);
+          setIsRecording(false);
+        }
+        return;
+      }
+
+      // Fatal, non-retryable error
+      isRecordingRef.current = false;
       setError(`音声認識エラー: ${event.error}`);
       setIsRecording(false);
-      isRecordingRef.current = false;
     };
 
     recognition.onend = () => {
-      // Auto-restart if user hasn't stopped manually
-      if (isRecordingRef.current) {
-        try {
-          recognition.start();
-        } catch {
-          // Already started — ignore
-        }
-      } else {
+      if (!isRecordingRef.current) {
         setIsRecording(false);
         setInterimText('');
+        return;
       }
+
+      // Exponential backoff: 500ms, 1s, 2s, 4s, 8s
+      const delay = Math.min(500 * 2 ** (retryCountRef.current - 1), 8000);
+      const actualDelay = retryCountRef.current > 0 ? delay : 0;
+
+      retryTimerRef.current = setTimeout(() => {
+        if (!isRecordingRef.current) return;
+        try {
+          const next = startInstance();
+          recognitionRef.current = next;
+          next.start();
+        } catch {
+          // recognition already starting — ignore
+        }
+      }, actualDelay);
     };
 
     return recognition;
@@ -116,16 +156,26 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     }
     if (isRecordingRef.current) return;
 
-    const recognition = buildRecognition();
+    setError(null);
+    setRetryWarning(null);
+    retryCountRef.current = 0;
+    isRecordingRef.current = true;
+
+    const recognition = startInstance();
     recognitionRef.current = recognition;
     recognition.start();
-  }, [isSupported, buildRecognition]);
+  }, [isSupported, startInstance]);
 
   const stopRecording = useCallback(() => {
     isRecordingRef.current = false;
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
     recognitionRef.current?.stop();
     setIsRecording(false);
     setInterimText('');
+    setRetryWarning(null);
   }, []);
 
   const clearEntries = useCallback(() => {
@@ -133,10 +183,10 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     entryIdRef.current = 0;
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       isRecordingRef.current = false;
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       recognitionRef.current?.abort();
     };
   }, []);
@@ -147,6 +197,7 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     entries,
     interimText,
     error,
+    retryWarning,
     startRecording,
     stopRecording,
     clearEntries,
