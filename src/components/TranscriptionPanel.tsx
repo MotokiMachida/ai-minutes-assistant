@@ -10,11 +10,11 @@ interface TranscriptionPanelProps {
 export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelProps) {
   const {
     isRecording,
+    isTranscribing,
     isSupported,
     entries,
     interimText,
     error,
-    retryWarning,
     startRecording,
     stopRecording,
     clearEntries,
@@ -34,10 +34,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
     onTranscriptUpdate?.(fullText);
   }, [entries, onTranscriptUpdate]);
 
-  const elapsedSeconds = entries.length > 0
-    ? Math.round((Date.now() - Date.now()) / 1000) // placeholder — replaced by real timer below
-    : 0;
-  void elapsedSeconds;
+  const isBusy = isRecording || isTranscribing;
 
   return (
     <div className="flex flex-col h-full">
@@ -46,11 +43,11 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
         <div className="flex items-center gap-2">
           <Radio className="w-4 h-4 text-gray-500" />
           <h2 className="text-sm font-semibold text-gray-700 tracking-wide uppercase">
-            リアルタイム文字起こし
+            音声文字起こし
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          {entries.length > 0 && !isRecording && (
+          {entries.length > 0 && !isBusy && (
             <button
               onClick={clearEntries}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
@@ -61,7 +58,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
           )}
           <button
             onClick={isRecording ? stopRecording : startRecording}
-            disabled={!isSupported}
+            disabled={!isSupported || isTranscribing}
             className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
               isRecording
                 ? 'bg-red-50 text-red-600 border border-red-200 hover:bg-red-100'
@@ -71,7 +68,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
             {isRecording ? (
               <>
                 <MicOff className="w-4 h-4" />
-                停止
+                停止して文字起こし
               </>
             ) : (
               <>
@@ -90,15 +87,17 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
           </span>
-          <span className="text-xs text-red-600 font-medium">録音中 — 日本語で話してください</span>
+          <span className="text-xs text-red-600 font-medium">
+            録音中 — 停止ボタンを押すと文字起こしが始まります
+          </span>
         </div>
       )}
 
-      {/* Retry warning (transient network issue) */}
-      {retryWarning && (
+      {/* Transcribing indicator */}
+      {isTranscribing && (
         <div className="flex items-center gap-2 px-6 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">
           <Loader2 className="w-3.5 h-3.5 shrink-0 animate-spin" />
-          {retryWarning}
+          Gemini が文字起こし中です。しばらくお待ちください…
         </div>
       )}
 
@@ -120,10 +119,13 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
 
       {/* Transcript list */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {entries.length === 0 && !isRecording && (
+        {entries.length === 0 && !isBusy && (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 gap-3">
             <Mic className="w-8 h-8 opacity-30" />
-            <p className="text-sm">録音開始ボタンを押して<br />話し始めてください</p>
+            <p className="text-sm">
+              録音開始ボタンを押して話し始めてください<br />
+              <span className="text-xs">停止後にまとめて文字起こしされます</span>
+            </p>
           </div>
         )}
 
@@ -139,7 +141,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
           </div>
         ))}
 
-        {/* Interim text (in-progress speech) */}
+        {/* Interim text (unused in batch mode, kept for compatibility) */}
         {interimText && (
           <div className="flex gap-3">
             <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-semibold mt-0.5 bg-gray-100 text-gray-400">
@@ -151,8 +153,8 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
           </div>
         )}
 
-        {/* Listening dots when recording but nothing spoken yet */}
-        {isRecording && !interimText && (
+        {/* Listening dots when recording */}
+        {isRecording && (
           <div className="flex gap-3">
             <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full mt-0.5 bg-gray-50" />
             <div className="flex items-center gap-1 py-2">
@@ -169,7 +171,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
       {/* Footer stats */}
       <div className="px-6 py-3 border-t border-gray-100 bg-gray-50">
         <div className="flex items-center justify-between text-xs text-gray-400">
-          <span>{entries.length} 件の発言</span>
+          <span>{entries.length} 件の文字起こし</span>
           <span>{entries.length > 0 ? `最終: ${entries[entries.length - 1].timestamp}` : '—'}</span>
         </div>
       </div>

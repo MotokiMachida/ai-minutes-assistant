@@ -10,22 +10,18 @@ export interface TranscriptEntry {
 
 interface UseSpeechRecognitionReturn {
   isRecording: boolean;
+  isTranscribing: boolean;
   isSupported: boolean;
   entries: TranscriptEntry[];
   interimText: string;
   error: string | null;
-  /** Non-null while a segment is being transcribed by Gemini */
-  retryWarning: string | null;
   startRecording: () => void;
   stopRecording: () => void;
   clearEntries: () => void;
 }
 
-/** Duration of each audio segment (ms) */
+/** Duration of each audio segment buffered during recording (ms) */
 const SEGMENT_MS = 5000;
-
-/** Minimum interval between Gemini API calls (ms) */
-const THROTTLE_MS = 5000;
 
 function getTimestamp(): string {
   return new Date().toLocaleTimeString('ja-JP', {
@@ -85,15 +81,14 @@ function recordSegment(
 
 export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [retryWarning, setRetryWarning] = useState<string | null>(null);
 
   const entryIdRef = useRef(0);
   const isRecordingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const lastApiCallTimeRef = useRef<number>(0);
   const audioBufferRef = useRef<Blob[]>([]);
 
   const isSupported =
@@ -107,69 +102,31 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
       return;
     }
     if (isRecordingRef.current) return;
+    isRecordingRef.current = true; // guard before await to prevent duplicate calls
 
-    // Request microphone access
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
+      isRecordingRef.current = false;
       setError('マイクへのアクセスが拒否されました。ブラウザの設定を確認してください。');
       return;
     }
 
     streamRef.current = stream;
+    audioBufferRef.current = [];
     setError(null);
-    setRetryWarning(null);
-    isRecordingRef.current = true;
     setIsRecording(true);
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    // Recording loop: record → (buffer) → throttle → transcribe → repeat
+    // Recording loop: accumulate audio blobs — no API calls until stop
     (async () => {
       while (isRecordingRef.current) {
         const blob = await recordSegment(stream, SEGMENT_MS, abortController.signal);
-
-        if (!blob || blob.size < 500) continue; // skip empty/near-silent blobs
-
-        // Accumulate audio into buffer
-        audioBufferRef.current.push(blob);
-
-        const now = Date.now();
-        const elapsed = now - lastApiCallTimeRef.current;
-        if (elapsed < THROTTLE_MS) {
-          // Not enough time has passed — keep buffering, skip this cycle
-          continue;
-        }
-
-        // Merge all buffered blobs into one before sending
-        const blobsToSend = audioBufferRef.current.splice(0);
-        const merged = new Blob(blobsToSend, { type: blobsToSend[0].type });
-        lastApiCallTimeRef.current = now;
-
-        setRetryWarning('音声を解析中...');
-        try {
-          const base64 = await blobToBase64(merged);
-          const text = await transcribeAudio(base64, merged.type);
-
-          if (text) {
-            setEntries((prev) => [
-              ...prev,
-              {
-                id: ++entryIdRef.current,
-                text,
-                timestamp: getTimestamp(),
-                isFinal: true,
-              },
-            ]);
-          }
-        } catch (err) {
-          if (isRecordingRef.current) {
-            console.warn('Gemini transcription error:', err);
-          }
-        } finally {
-          setRetryWarning(null);
+        if (blob && blob.size >= 500) {
+          audioBufferRef.current.push(blob);
         }
       }
     })();
@@ -181,10 +138,42 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     abortControllerRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    audioBufferRef.current = [];
-    lastApiCallTimeRef.current = 0;
     setIsRecording(false);
-    setRetryWarning(null);
+
+    // Drain buffer and send ONE request to Gemini
+    const blobsToSend = audioBufferRef.current.splice(0);
+    if (blobsToSend.length === 0) return;
+
+    const merged = new Blob(blobsToSend, { type: blobsToSend[0].type });
+    setIsTranscribing(true);
+
+    (async () => {
+      try {
+        const base64 = await blobToBase64(merged);
+        const text = await transcribeAudio(base64, merged.type);
+        if (text) {
+          setEntries((prev) => [
+            ...prev,
+            {
+              id: ++entryIdRef.current,
+              text,
+              timestamp: getTimestamp(),
+              isFinal: true,
+            },
+          ]);
+        }
+      } catch (err) {
+        console.warn('Gemini transcription error:', err);
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+          setError('APIの利用上限に達しています。しばらく待ってから再度お試しください。');
+        } else {
+          setError('文字起こしに失敗しました。もう一度お試しください。');
+        }
+      } finally {
+        setIsTranscribing(false);
+      }
+    })();
   }, []);
 
   const clearEntries = useCallback(() => {
@@ -202,11 +191,11 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
 
   return {
     isRecording,
+    isTranscribing,
     isSupported,
     entries,
-    interimText: '',   // Gemini方式はストリーミングなし、代わりに retryWarning で状態表示
+    interimText: '',
     error,
-    retryWarning,
     startRecording,
     stopRecording,
     clearEntries,

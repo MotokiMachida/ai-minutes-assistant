@@ -2,78 +2,85 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useSpeechRecognition } from '../useSpeechRecognition';
 
-// ---------- Web Speech API mock ----------
-interface MockInstance {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  onstart: ((e: unknown) => void) | null;
-  onend: ((e: unknown) => void) | null;
-  onerror: ((e: unknown) => void) | null;
-  onresult: ((e: unknown) => void) | null;
-  start: ReturnType<typeof vi.fn>;
-  stop: ReturnType<typeof vi.fn>;
-  abort: ReturnType<typeof vi.fn>;
+// ---------- Mock: transcribeAudio ----------
+vi.mock('../../services/gemini', () => ({
+  transcribeAudio: vi.fn(),
+}));
+import { transcribeAudio } from '../../services/gemini';
+const mockTranscribeAudio = vi.mocked(transcribeAudio);
+
+// ---------- Mock: MediaRecorder ----------
+// Produces a blob > 500 bytes so it passes the size filter
+const LARGE_AUDIO = new Uint8Array(600).fill(1);
+
+class MockMediaRecorder {
+  static isTypeSupported = () => true;
+  mimeType = 'audio/webm';
+  state: 'inactive' | 'recording' = 'inactive';
+  ondataavailable: ((e: { data: Blob }) => void) | null = null;
+  onstop: (() => void) | null = null;
+
+  start() { this.state = 'recording'; }
+  stop() {
+    this.state = 'inactive';
+    this.ondataavailable?.({ data: new Blob([LARGE_AUDIO], { type: 'audio/webm' }) });
+    this.onstop?.();
+  }
 }
 
-let mockInstance: MockInstance;
+// ---------- Mock: MediaStream ----------
+class MockMediaStream {
+  getTracks() { return [{ stop: vi.fn() }]; }
+}
 
-// vi.fn(function(){}) — 通常関数を使えばコンストラクタとして new できる
-const MockSpeechRecognition = vi.fn(function () {
-  mockInstance = {
-    lang: '',
-    continuous: false,
-    interimResults: false,
-    maxAlternatives: 1,
-    onstart: null,
-    onend: null,
-    onerror: null,
-    onresult: null,
-    start: vi.fn(function () { mockInstance.onstart?.({}); }),
-    stop: vi.fn(function () { mockInstance.onend?.({}); }),
-    abort: vi.fn(),
-  };
-  return mockInstance;
-});
+// ---------- Mock: FileReader ----------
+// Resolves synchronously (no timeout) to avoid fake-timer complexity
+class MockFileReader {
+  result: string | null = null;
+  onload: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readAsDataURL(_blob: Blob) {
+    this.result = 'data:audio/webm;base64,dGVzdA==';
+    this.onload?.();
+  }
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
-  Object.defineProperty(window, 'SpeechRecognition', {
-    value: MockSpeechRecognition,
+
+  Object.defineProperty(window, 'MediaRecorder', {
+    value: MockMediaRecorder,
     writable: true,
     configurable: true,
   });
-  // webkitSpeechRecognition を未定義にして SpeechRecognition を優先させる
-  Object.defineProperty(window, 'webkitSpeechRecognition', {
-    value: undefined,
+
+  Object.defineProperty(navigator, 'mediaDevices', {
+    value: { getUserMedia: vi.fn().mockResolvedValue(new MockMediaStream()) },
     writable: true,
     configurable: true,
   });
-  MockSpeechRecognition.mockClear();
+
+  Object.defineProperty(window, 'FileReader', {
+    value: MockFileReader,
+    writable: true,
+    configurable: true,
+  });
+
+  mockTranscribeAudio.mockReset();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 // ---------- helpers ----------
-function fireResult(transcript: string, isFinal: boolean) {
-  mockInstance.onresult?.({
-    resultIndex: 0,
-    results: Object.assign(
-      { length: 1 },
-      { 0: Object.assign({ isFinal, length: 1 }, { 0: { transcript } }) }
-    ),
-  });
-}
 
-function fireError(error: string) {
-  mockInstance.onerror?.({ error, message: error });
-}
-
-function fireEnd() {
-  mockInstance.onend?.({});
+/** startRecording + wait one full SEGMENT_MS so at least one blob is buffered */
+async function startAndBuffer(result: ReturnType<typeof useSpeechRecognition>) {
+  await act(async () => { result.startRecording(); });
+  // Advance past SEGMENT_MS so recordSegment's timeout fires and blob is buffered
+  await act(async () => { await vi.advanceTimersByTimeAsync(5001); });
 }
 
 // ---------- tests ----------
@@ -81,119 +88,112 @@ describe('useSpeechRecognition', () => {
   it('初期状態の確認', () => {
     const { result } = renderHook(() => useSpeechRecognition());
     expect(result.current.isRecording).toBe(false);
+    expect(result.current.isTranscribing).toBe(false);
     expect(result.current.isSupported).toBe(true);
     expect(result.current.entries).toHaveLength(0);
     expect(result.current.interimText).toBe('');
     expect(result.current.error).toBeNull();
-    expect(result.current.retryWarning).toBeNull();
   });
 
-  it('startRecording で isRecording が true になる', () => {
+  it('startRecording で isRecording が true になる', async () => {
     const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
+    await act(async () => { result.current.startRecording(); });
     expect(result.current.isRecording).toBe(true);
   });
 
-  it('final な認識結果が entries に追加される', () => {
+  it('startRecording は重複して呼んでも getUserMedia は1回だけ', async () => {
     const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-    act(() => { fireResult('こんにちは', true); });
-
-    expect(result.current.entries).toHaveLength(1);
-    expect(result.current.entries[0].text).toBe('こんにちは');
-    expect(result.current.entries[0].isFinal).toBe(true);
+    await act(async () => {
+      result.current.startRecording();
+      result.current.startRecording();
+    });
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
   });
 
-  it('interim な結果は interimText に反映され entries には入らない', () => {
+  it('stopRecording で isRecording が false になる', async () => {
     const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-    act(() => { fireResult('入力中...', false); });
-
-    expect(result.current.interimText).toBe('入力中...');
-    expect(result.current.entries).toHaveLength(0);
-  });
-
-  it('stopRecording で isRecording が false になる', () => {
-    const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
+    await act(async () => { result.current.startRecording(); });
     act(() => { result.current.stopRecording(); });
     expect(result.current.isRecording).toBe(false);
   });
 
-  it('clearEntries で entries がリセットされる', () => {
+  it('stopRecording 後に isTranscribing が true になり完了後 false になる', async () => {
     const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-    act(() => { fireResult('テスト発言', true); });
+    await startAndBuffer(result.current);
+
+    let resolveTranscribe!: (v: string) => void;
+    mockTranscribeAudio.mockReturnValue(
+      new Promise<string>((res) => { resolveTranscribe = res; })
+    );
+
+    act(() => { result.current.stopRecording(); });
+    expect(result.current.isTranscribing).toBe(true);
+
+    await act(async () => { resolveTranscribe('テスト'); });
+    expect(result.current.isTranscribing).toBe(false);
+  });
+
+  it('文字起こし結果が entries に追加される', async () => {
+    const { result } = renderHook(() => useSpeechRecognition());
+    await startAndBuffer(result.current);
+
+    mockTranscribeAudio.mockResolvedValue('こんにちは、テストです。');
+    await act(async () => { result.current.stopRecording(); });
+
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.entries[0].text).toBe('こんにちは、テストです。');
+    expect(result.current.entries[0].isFinal).toBe(true);
+  });
+
+  it('文字起こし結果が空文字の場合は entries に追加されない', async () => {
+    const { result } = renderHook(() => useSpeechRecognition());
+    await startAndBuffer(result.current);
+
+    mockTranscribeAudio.mockResolvedValue('');
+    await act(async () => { result.current.stopRecording(); });
+
+    expect(result.current.entries).toHaveLength(0);
+  });
+
+  it('バッファが空のまま停止した場合は transcribeAudio を呼ばない', async () => {
+    const { result } = renderHook(() => useSpeechRecognition());
+    await act(async () => { result.current.startRecording(); });
+    // 停止 — まだ5秒経っていないのでバッファ空
+    act(() => { result.current.stopRecording(); });
+
+    expect(mockTranscribeAudio).not.toHaveBeenCalled();
+    expect(result.current.isTranscribing).toBe(false);
+  });
+
+  it('clearEntries で entries がリセットされる', async () => {
+    const { result } = renderHook(() => useSpeechRecognition());
+    await startAndBuffer(result.current);
+
+    mockTranscribeAudio.mockResolvedValue('テスト発言');
+    await act(async () => { result.current.stopRecording(); });
     expect(result.current.entries).toHaveLength(1);
 
     act(() => { result.current.clearEntries(); });
     expect(result.current.entries).toHaveLength(0);
   });
 
-  it('no-speech エラーは無視される', () => {
+  it('マイクアクセス拒否時に error がセットされる', async () => {
+    vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(new Error('denied'));
     const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-    act(() => { fireError('no-speech'); });
+    await act(async () => { result.current.startRecording(); });
 
-    expect(result.current.error).toBeNull();
-    expect(result.current.isRecording).toBe(true);
-  });
-
-  it('network エラー時は retryWarning が表示され録音継続', () => {
-    const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-
-    act(() => {
-      fireError('network');
-      fireEnd();
-    });
-
-    expect(result.current.isRecording).toBe(true);
-    expect(result.current.retryWarning).toMatch(/ネットワーク接続を確認/);
-    expect(result.current.error).toBeNull();
-  });
-
-  it('network エラーが MAX_RETRIES 回続いたら fatal エラーになる', () => {
-    const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-
-    // タイマーを実行しない = 再起動の onstart が呼ばれず retryCount がリセットされない
-    // MAX_RETRIES(5) を超えるには retryCount > 5 = 6 回エラーが必要
-    for (let i = 0; i < 6; i++) {
-      act(() => {
-        fireError('network');
-        fireEnd();
-      });
-    }
-
-    expect(result.current.error).toBe(
-      'ネットワークエラーが続いています。インターネット接続を確認して再度お試しください。'
-    );
+    expect(result.current.error).toMatch(/マイクへのアクセスが拒否/);
     expect(result.current.isRecording).toBe(false);
   });
 
-  it('network エラー後に正常起動したら retryWarning がクリアされる', () => {
+  it('文字起こし失敗時に error がセットされ isTranscribing が false になる', async () => {
     const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
+    await startAndBuffer(result.current);
 
-    // エラー → タイマー実行前の時点で retryWarning が表示されている
-    act(() => {
-      fireError('network');
-      fireEnd();
-    });
-    expect(result.current.retryWarning).not.toBeNull();
+    mockTranscribeAudio.mockRejectedValue(new Error('API error'));
+    await act(async () => { result.current.stopRecording(); });
 
-    // タイマーを実行 → 再起動 → onstart 発火 → retryWarning クリア
-    act(() => { vi.runAllTimers(); });
-    expect(result.current.retryWarning).toBeNull();
-  });
-
-  it('不明なエラーは即座に fatal エラーになる', () => {
-    const { result } = renderHook(() => useSpeechRecognition());
-    act(() => { result.current.startRecording(); });
-    act(() => { fireError('not-allowed'); });
-
-    expect(result.current.error).toMatch(/音声認識エラー/);
-    expect(result.current.isRecording).toBe(false);
+    expect(result.current.isTranscribing).toBe(false);
+    expect(result.current.error).toMatch(/文字起こしに失敗/);
   });
 });

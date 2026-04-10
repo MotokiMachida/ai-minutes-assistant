@@ -1,70 +1,90 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { transcribeAudio, analyzeTranscript } from '../gemini';
 
-// vi.hoisted で先に mock 関数を定義してから vi.mock に渡す
-const { mockGenerateContent } = vi.hoisted(() => ({
-  mockGenerateContent: vi.fn(),
-}));
-
-vi.mock('@google/genai', () => ({
-  // class 構文でコンストラクタとして使える形に
-  GoogleGenAI: class {
-    models = { generateContent: mockGenerateContent };
-  },
-}));
-
-vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key-dummy');
-
-// mock 設定後にインポート
-import { analyzeTranscript } from '../gemini';
-
+// ---------- fetch mock ----------
 beforeEach(() => {
-  mockGenerateContent.mockReset();
+  vi.stubGlobal('fetch', vi.fn());
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function mockFetchOk(body: unknown) {
+  vi.mocked(fetch).mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve(body),
+  } as Response);
+}
+
+function mockFetchError(status: number, error: string) {
+  vi.mocked(fetch).mockResolvedValue({
+    ok: false,
+    status,
+    json: () => Promise.resolve({ error }),
+  } as Response);
+}
+
+// ---------- transcribeAudio ----------
+describe('transcribeAudio', () => {
+  it('POST /api/transcribe を呼び出して text を返す', async () => {
+    mockFetchOk({ text: 'こんにちは' });
+
+    const result = await transcribeAudio('base64data', 'audio/webm');
+
+    expect(fetch).toHaveBeenCalledWith('/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audioBase64: 'base64data', mimeType: 'audio/webm' }),
+    });
+    expect(result).toBe('こんにちは');
+  });
+
+  it('サーバーエラー時はエラーメッセージをスローする', async () => {
+    mockFetchError(500, '音声処理に失敗しました');
+
+    await expect(transcribeAudio('base64data', 'audio/webm')).rejects.toThrow('音声処理に失敗しました');
+  });
+
+  it('429 Too Many Requests の場合もエラーをスローする', async () => {
+    mockFetchError(429, 'Rate limit exceeded');
+
+    await expect(transcribeAudio('base64data', 'audio/webm')).rejects.toThrow('Rate limit exceeded');
+  });
+});
+
+// ---------- analyzeTranscript ----------
 describe('analyzeTranscript', () => {
-  it('正常なJSONレスポンスをパースして返す', async () => {
+  it('POST /api/analyze を呼び出して AnalysisResult を返す', async () => {
     const mockResult = {
       summary: '会議の要約です。',
       todos: [{ text: 'タスクA', assignee: '田中', deadline: '来週' }],
       decisions: [{ text: '決定事項A', decidedBy: '全員' }],
     };
-    mockGenerateContent.mockResolvedValueOnce({ text: JSON.stringify(mockResult) });
+    mockFetchOk(mockResult);
 
     const result = await analyzeTranscript('テスト用の文字起こしテキスト');
 
+    expect(fetch).toHaveBeenCalledWith('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ transcriptText: 'テスト用の文字起こしテキスト' }),
+    });
     expect(result.summary).toBe('会議の要約です。');
     expect(result.todos).toHaveLength(1);
     expect(result.todos[0].assignee).toBe('田中');
-    expect(result.decisions).toHaveLength(1);
     expect(result.decisions[0].decidedBy).toBe('全員');
   });
 
-  it('コードフェンス付きレスポンスも正しくパースする', async () => {
-    const mockResult = { summary: 'フェンス付きテスト', todos: [], decisions: [] };
-    const fenced = '```json\n' + JSON.stringify(mockResult) + '\n```';
-    mockGenerateContent.mockResolvedValueOnce({ text: fenced });
+  it('サーバーエラー時はエラーをスローする', async () => {
+    mockFetchError(500, 'Internal server error');
 
-    const result = await analyzeTranscript('テキスト');
-
-    expect(result.summary).toBe('フェンス付きテスト');
-    expect(result.todos).toHaveLength(0);
+    await expect(analyzeTranscript('テキスト')).rejects.toThrow('Internal server error');
   });
 
-  it('不正なJSONのときはエラーをスローする', async () => {
-    mockGenerateContent.mockResolvedValueOnce({ text: 'これはJSONではありません' });
+  it('fetch 自体が失敗した場合もエラーをスローする', async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error('Network error'));
 
-    await expect(analyzeTranscript('テキスト')).rejects.toThrow();
-  });
-
-  it('APIキー未設定のときはエラーをスローする', async () => {
-    vi.stubEnv('VITE_GEMINI_API_KEY', 'your_api_key_here');
-    vi.resetModules();
-    const { analyzeTranscript: fresh } = await import('../gemini');
-
-    await expect(fresh('テキスト')).rejects.toThrow('VITE_GEMINI_API_KEY');
-
-    // テスト後に元に戻す
-    vi.stubEnv('VITE_GEMINI_API_KEY', 'test-key-dummy');
-    vi.resetModules();
+    await expect(analyzeTranscript('テキスト')).rejects.toThrow('Network error');
   });
 });
