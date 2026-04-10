@@ -1,6 +1,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
+};
+
 const SYSTEM_PROMPT = `あなたは会議の議事録作成アシスタントです。
 与えられた会議の文字起こしテキストを分析し、以下の構造化データを JSON 形式で返してください。
 
