@@ -21,8 +21,11 @@ interface UseSpeechRecognitionReturn {
   clearEntries: () => void;
 }
 
-/** Duration of each audio segment sent to Gemini (ms) */
+/** Duration of each audio segment (ms) */
 const SEGMENT_MS = 5000;
+
+/** Minimum interval between Gemini API calls (ms) */
+const THROTTLE_MS = 5000;
 
 function getTimestamp(): string {
   return new Date().toLocaleTimeString('ja-JP', {
@@ -90,6 +93,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const isRecordingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const lastApiCallTimeRef = useRef<number>(0);
+  const audioBufferRef = useRef<Blob[]>([]);
 
   const isSupported =
     typeof window !== 'undefined' &&
@@ -121,17 +126,32 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    // Recording loop: record → transcribe → repeat
+    // Recording loop: record → (buffer) → throttle → transcribe → repeat
     (async () => {
       while (isRecordingRef.current) {
         const blob = await recordSegment(stream, SEGMENT_MS, abortController.signal);
 
         if (!blob || blob.size < 500) continue; // skip empty/near-silent blobs
 
+        // Accumulate audio into buffer
+        audioBufferRef.current.push(blob);
+
+        const now = Date.now();
+        const elapsed = now - lastApiCallTimeRef.current;
+        if (elapsed < THROTTLE_MS) {
+          // Not enough time has passed — keep buffering, skip this cycle
+          continue;
+        }
+
+        // Merge all buffered blobs into one before sending
+        const blobsToSend = audioBufferRef.current.splice(0);
+        const merged = new Blob(blobsToSend, { type: blobsToSend[0].type });
+        lastApiCallTimeRef.current = now;
+
         setRetryWarning('音声を解析中...');
         try {
-          const base64 = await blobToBase64(blob);
-          const text = await transcribeAudio(base64, blob.type);
+          const base64 = await blobToBase64(merged);
+          const text = await transcribeAudio(base64, merged.type);
 
           if (text) {
             setEntries((prev) => [
@@ -161,6 +181,8 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     abortControllerRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+    audioBufferRef.current = [];
+    lastApiCallTimeRef.current = 0;
     setIsRecording(false);
     setRetryWarning(null);
   }, []);
