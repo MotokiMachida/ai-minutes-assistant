@@ -55,7 +55,7 @@ function recordSegment(
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
 
-    const recorder = new MediaRecorder(stream, { mimeType });
+    const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 });
     const chunks: BlobPart[] = [];
 
     recorder.ondataavailable = (e) => {

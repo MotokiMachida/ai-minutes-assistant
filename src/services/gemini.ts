@@ -30,5 +30,5 @@ export async function transcribeAudio(audioBase64: string, mimeType: string): Pr
 }
 
 export async function analyzeTranscript(transcriptText: string): Promise<AnalysisResult> {
-  return apiPost<AnalysisResult>('/api/analyze', { transcriptText });
+  return apiPost<AnalysisResult>('/api/generate', { transcriptText });
 }

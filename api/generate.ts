@@ -65,14 +65,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const raw = response.text ?? '';
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned) as unknown;
 
     return res.status(200).json(parsed);
   } catch (err) {
-    console.error('[/api/analyze]', err);
-    const httpStatus = typeof (err as Record<string, unknown>).status === 'number'
-      ? (err as Record<string, unknown>).status as number
-      : 500;
+    console.error('[/api/generate]', err);
+    const httpStatus =
+      typeof (err as Record<string, unknown>).status === 'number'
+        ? ((err as Record<string, unknown>).status as number)
+        : 500;
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(httpStatus).json({ error: message });
   }
