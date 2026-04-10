@@ -48,7 +48,7 @@
 ### 前提条件
 
 - Google Gemini API キー（無料取得: https://aistudio.google.com/app/apikey）
-- Node.js 18 以上
+- Node.js 22 以上
 - Chrome ブラウザ（`MediaRecorder API` を使用）
 
 ---
@@ -183,7 +183,7 @@ npm run test
 - Gemini API 無料枠の日次上限に達すると 429 エラーになります。翌日にリセットされます
 - マイク音声は Gemini API（Google）へ送信されます。機密性の高い会議での利用は [Gemini API 利用規約](https://ai.google.dev/gemini-api/terms) をご確認ください
 - Chrome / Edge 以外のブラウザでは `MediaRecorder API` が動作しない場合があります
-- Vercel Hobby プランではサーバーレス関数のタイムアウトが 60 秒のため、非常に長い音声の処理に時間がかかる場合があります
+- Vercel Functions のデフォルトタイムアウトは 300 秒です。非常に長い音声ファイルの処理には時間がかかる場合があります
 
 ---
 
