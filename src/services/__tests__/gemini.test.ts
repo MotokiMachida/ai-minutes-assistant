@@ -55,7 +55,7 @@ describe('transcribeAudio', () => {
 
 // ---------- analyzeTranscript ----------
 describe('analyzeTranscript', () => {
-  it('POST /api/analyze を呼び出して AnalysisResult を返す', async () => {
+  it('POST /api/generate を呼び出して AnalysisResult を返す', async () => {
     const mockResult = {
       summary: '会議の要約です。',
       todos: [{ text: 'タスクA', assignee: '田中', deadline: '来週' }],
@@ -65,7 +65,7 @@ describe('analyzeTranscript', () => {
 
     const result = await analyzeTranscript('テスト用の文字起こしテキスト');
 
-    expect(fetch).toHaveBeenCalledWith('/api/analyze', {
+    expect(fetch).toHaveBeenCalledWith('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ transcriptText: 'テスト用の文字起こしテキスト' }),
