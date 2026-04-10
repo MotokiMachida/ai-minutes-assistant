@@ -1,7 +1,12 @@
+import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 
 export const config = {
-  runtime: 'edge',
+  api: {
+    bodyParser: {
+      sizeLimit: '1mb',
+    },
+  },
 };
 
 const SYSTEM_PROMPT = `あなたは会議の議事録作成アシスタントです。
@@ -30,30 +35,19 @@ const SYSTEM_PROMPT = `あなたは会議の議事録作成アシスタントで
 - タスクや決定事項が見当たらない場合は空配列を返してください。
 - テキストが短すぎる・会議内容でない場合は summary にその旨を記載し、配列は空にしてください。`;
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' };
-
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: JSON_HEADERS,
-    });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { transcriptText } = (await req.json()) as { transcriptText?: string };
+  const { transcriptText } = req.body as { transcriptText?: string };
   if (!transcriptText) {
-    return new Response(JSON.stringify({ error: 'transcriptText is required' }), {
-      status: 400,
-      headers: JSON_HEADERS,
-    });
+    return res.status(400).json({ error: 'transcriptText is required' });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return new Response(JSON.stringify({ error: 'GEMINI_API_KEY is not configured on the server' }), {
-      status: 500,
-      headers: JSON_HEADERS,
-    });
+    return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server' });
   }
 
   try {
@@ -73,10 +67,7 @@ export default async function handler(req: Request): Promise<Response> {
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
     const parsed = JSON.parse(cleaned) as unknown;
 
-    return new Response(JSON.stringify(parsed), {
-      status: 200,
-      headers: JSON_HEADERS,
-    });
+    return res.status(200).json(parsed);
   } catch (err) {
     console.error('[/api/generate]', err);
     const httpStatus =
@@ -84,9 +75,6 @@ export default async function handler(req: Request): Promise<Response> {
         ? ((err as Record<string, unknown>).status as number)
         : 500;
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: message }), {
-      status: httpStatus,
-      headers: JSON_HEADERS,
-    });
+    return res.status(httpStatus).json({ error: message });
   }
 }
