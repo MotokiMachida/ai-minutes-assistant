@@ -24,14 +24,25 @@ interface UseSpeechRecognitionReturn {
 /** Duration of each audio segment (ms) */
 const SEGMENT_MS = 5000;
 
-/** Minimum interval between Gemini API calls (ms) */
-const THROTTLE_MS = 5000;
+/** Minimum interval between Gemini API calls (ms) — prevents 429 errors */
+const THROTTLE_MS = 10000;
 
 function getTimestamp(): string {
   return new Date().toLocaleTimeString('ja-JP', {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
+  });
+}
+
+/** Sleep for `ms` milliseconds, resolving early if the signal is aborted */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer);
+      resolve();
+    });
   });
 }
 
@@ -93,7 +104,6 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
   const isRecordingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const lastApiCallTimeRef = useRef<number>(0);
   const audioBufferRef = useRef<Blob[]>([]);
 
   const isSupported =
@@ -126,33 +136,31 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
-    // Recording loop: record → (buffer) → throttle → transcribe → repeat
+    // Loop 1: continuously record short segments → push to buffer
     (async () => {
       while (isRecordingRef.current) {
         const blob = await recordSegment(stream, SEGMENT_MS, abortController.signal);
-
-        if (!blob || blob.size < 500) continue; // skip empty/near-silent blobs
-
-        // Accumulate audio into buffer
-        audioBufferRef.current.push(blob);
-
-        const now = Date.now();
-        const elapsed = now - lastApiCallTimeRef.current;
-        if (elapsed < THROTTLE_MS) {
-          // Not enough time has passed — keep buffering, skip this cycle
-          continue;
+        if (blob && blob.size >= 500) {
+          audioBufferRef.current.push(blob);
         }
+      }
+    })();
 
-        // Merge all buffered blobs into one before sending
+    // Loop 2: every THROTTLE_MS, drain the buffer and send ONE API call
+    (async () => {
+      while (isRecordingRef.current) {
+        await sleep(THROTTLE_MS, abortController.signal);
+        if (!isRecordingRef.current) break;
+
         const blobsToSend = audioBufferRef.current.splice(0);
+        if (blobsToSend.length === 0) continue;
+
         const merged = new Blob(blobsToSend, { type: blobsToSend[0].type });
-        lastApiCallTimeRef.current = now;
 
         setRetryWarning('音声を解析中...');
         try {
           const base64 = await blobToBase64(merged);
           const text = await transcribeAudio(base64, merged.type);
-
           if (text) {
             setEntries((prev) => [
               ...prev,
@@ -182,7 +190,6 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     audioBufferRef.current = [];
-    lastApiCallTimeRef.current = 0;
     setIsRecording(false);
     setRetryWarning(null);
   }, []);
