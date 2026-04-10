@@ -164,7 +164,12 @@ export function useSpeechRecognition(): UseSpeechRecognitionReturn {
         }
       } catch (err) {
         console.warn('Gemini transcription error:', err);
-        setError('文字起こしに失敗しました。もう一度お試しください。');
+        const msg = err instanceof Error ? err.message : '';
+        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota')) {
+          setError('APIの利用上限に達しています。しばらく待ってから再度お試しください。');
+        } else {
+          setError('文字起こしに失敗しました。もう一度お試しください。');
+        }
       } finally {
         setIsTranscribing(false);
       }

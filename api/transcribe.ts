@@ -47,7 +47,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ text: (response.text ?? '').trim() });
   } catch (err) {
     console.error('[/api/transcribe]', err);
+    const httpStatus = typeof (err as Record<string, unknown>).status === 'number'
+      ? (err as Record<string, unknown>).status as number
+      : 500;
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return res.status(500).json({ error: message });
+    return res.status(httpStatus).json({ error: message });
   }
 }
