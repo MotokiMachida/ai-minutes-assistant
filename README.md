@@ -77,6 +77,25 @@ npm run dev:api
 
 ---
 
+### Docker（開発環境）
+
+```bash
+# 1. 環境変数ファイルを作成
+cp .env.example .env
+# .env を開いて GEMINI_API_KEY=<APIキー> を設定
+
+# 2. コンテナをビルドして起動
+docker compose up --build
+```
+
+ブラウザで http://localhost:3000 を開いてください。
+
+- `GEMINI_API_KEY` は `.env` から自動的に読み込まれ、コンテナ内の Express サーバーへ環境変数として渡されます
+- ソースコードを変更すると Vite HMR が自動リロードします（`docker compose up` 中はコンテナ内で動作）
+- `.env` はコンテナ内のみで使用されます（ブラウザには公開されません）
+
+---
+
 ### Vercel へのデプロイ
 
 1. GitHub リポジトリを Vercel に連携
@@ -113,11 +132,12 @@ npm run dev:api
 ## 開発コマンド
 
 ```bash
-npm run dev        # Vite のみ起動（UIの確認用）
-npm run dev:api    # vercel dev 起動（APIルートを含むフルスタック）
-npm run build      # 本番ビルド
-npm run test       # ユニットテスト実行（Vitest）
-npm run lint       # ESLint 実行
+npm run dev          # Vite のみ起動（UIの確認用）
+npm run dev:api      # vercel dev 起動（APIルートを含むフルスタック）
+npm run dev:docker   # Vite + Express 起動（Docker 内フルスタック）
+npm run build        # 本番ビルド
+npm run test         # ユニットテスト実行（Vitest）
+npm run lint         # ESLint 実行
 ```
 
 ---
