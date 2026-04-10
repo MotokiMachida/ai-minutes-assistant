@@ -1,10 +1,9 @@
-import { defineConfig } from 'vitest/config' 
+/// <reference types="vitest" />
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
-// もし Vitest を使っているなら、三斜線ディレクティブをファイルの先頭に追加します
-/// <reference types="vitest" />
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   // 'test' プロパティにエラーが出る場合は、
