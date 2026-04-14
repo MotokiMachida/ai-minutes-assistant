@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:local": "concurrently \"vite\" \"tsx local-api-server.ts\"",
     "dev:api": "vercel dev",
     "dev:docker": "concurrently \"vite --host\" \"tsx docker/api-server.ts\"",
     "build": "tsc -b && vite build",

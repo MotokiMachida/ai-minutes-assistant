@@ -50,31 +50,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server' });
   }
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: `${SYSTEM_PROMPT}\n\n---\n\n${transcriptText}` }],
-        },
-      ],
-    });
+  const MAX_RETRIES = 3;
+  let lastErr: unknown;
 
-    const raw = response.text ?? '';
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-    const parsed = JSON.parse(cleaned) as unknown;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: `${SYSTEM_PROMPT}\n\n---\n\n${transcriptText}` }],
+          },
+        ],
+      });
 
-    return res.status(200).json(parsed);
-  } catch (err) {
-    console.error('[/api/generate]', err);
-    const httpStatus =
-      typeof (err as Record<string, unknown>).status === 'number'
-        ? ((err as Record<string, unknown>).status as number)
-        : 500;
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return res.status(httpStatus).json({ error: message });
+      const raw = response.text ?? '';
+      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      const parsed = JSON.parse(cleaned) as unknown;
+
+      return res.status(200).json(parsed);
+    } catch (err) {
+      lastErr = err;
+      const status =
+        typeof (err as Record<string, unknown>).status === 'number'
+          ? ((err as Record<string, unknown>).status as number)
+          : 500;
+
+      if (status === 429 && attempt < MAX_RETRIES - 1) {
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s
+        console.warn(`[/api/generate] 429 rate limit, retry ${attempt + 1} in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+
+      console.error('[/api/generate]', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      return res.status(status).json({ error: message });
+    }
   }
+
+  // すべてのリトライが失敗
+  console.error('[/api/generate] all retries exhausted', lastErr);
+  const message = lastErr instanceof Error ? lastErr.message : 'Unknown error';
+  return res.status(429).json({ error: message });
 }

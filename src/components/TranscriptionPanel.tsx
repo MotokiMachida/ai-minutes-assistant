@@ -68,7 +68,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
             {isRecording ? (
               <>
                 <MicOff className="w-4 h-4" />
-                停止して文字起こし
+                録音停止
               </>
             ) : (
               <>
@@ -88,7 +88,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
           </span>
           <span className="text-xs text-red-600 font-medium">
-            録音中 — 停止ボタンを押すと文字起こしが始まります
+            録音中 — リアルタイムで文字起こしされています
           </span>
         </div>
       )}
@@ -124,7 +124,7 @@ export function TranscriptionPanel({ onTranscriptUpdate }: TranscriptionPanelPro
             <Mic className="w-8 h-8 opacity-30" />
             <p className="text-sm">
               録音開始ボタンを押して話し始めてください<br />
-              <span className="text-xs">停止後にまとめて文字起こしされます</span>
+              <span className="text-xs">話しながらリアルタイムでテキスト化されます</span>
             </p>
           </div>
         )}
