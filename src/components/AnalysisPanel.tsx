@@ -8,9 +8,11 @@ import {
   ChevronUp,
   Loader2,
   MessageSquareText,
+  Download,
 } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { useAnalysis } from '../hooks/useAnalysis';
+import type { MeetingInfo } from '../App';
 
 type SectionKey = 'summary' | 'todos' | 'decisions';
 
@@ -20,10 +22,69 @@ interface CheckedTodos {
 
 interface AnalysisPanelProps {
   transcriptText?: string;
+  meetingInfo?: MeetingInfo;
 }
 
-export function AnalysisPanel({ transcriptText }: AnalysisPanelProps) {
+export function AnalysisPanel({ transcriptText, meetingInfo }: AnalysisPanelProps) {
   const { result, status, errorMessage, analyze, reset } = useAnalysis();
+
+  const handleExport = useCallback(() => {
+    if (!result) return;
+
+    const title = meetingInfo?.title || '議事録';
+    const date = meetingInfo?.date || '';
+    const time = meetingInfo?.time || '';
+    const participants = meetingInfo?.participants || '';
+
+    const lines: string[] = [];
+    lines.push(`# ${title}`);
+    lines.push('');
+    if (date || time) lines.push(`**日時:** ${date}${time ? ' ' + time : ''}`);
+    if (participants) lines.push(`**参加者:** ${participants}`);
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+    lines.push('## 要約');
+    lines.push('');
+    lines.push(result.summary);
+    lines.push('');
+    lines.push('## ToDo');
+    lines.push('');
+    if (result.todos.length === 0) {
+      lines.push('なし');
+    } else {
+      for (const todo of result.todos) {
+        lines.push(`- [ ] ${todo.text}（担当: ${todo.assignee}、期限: ${todo.deadline}）`);
+      }
+    }
+    lines.push('');
+    lines.push('## 決定事項');
+    lines.push('');
+    if (result.decisions.length === 0) {
+      lines.push('なし');
+    } else {
+      for (const d of result.decisions) {
+        lines.push(`- ${d.text}（決定者: ${d.decidedBy}）`);
+      }
+    }
+    if (transcriptText) {
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+      lines.push('## 文字起こし');
+      lines.push('');
+      lines.push(transcriptText);
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const filename = `${title}_${date || 'minutes'}.md`.replace(/\s+/g, '_');
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [result, meetingInfo, transcriptText]);
 
   const [open, setOpen] = useState<Record<SectionKey, boolean>>({
     summary: true,
@@ -67,15 +128,24 @@ export function AnalysisPanel({ transcriptText }: AnalysisPanelProps) {
         </div>
         <div className="flex items-center gap-2">
           {hasResult && (
-            <button
-              onClick={handleReset}
-              className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              クリア
-            </button>
+            <>
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                <Download className="w-3.5 h-3.5" />
+                MD
+              </button>
+              <button
+                onClick={handleReset}
+                className="px-2.5 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                クリア
+              </button>
+            </>
           )}
           <button
-            onClick={hasResult ? handleAnalyze : handleAnalyze}
+            onClick={handleAnalyze}
             disabled={!canAnalyze}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
