@@ -89,7 +89,15 @@ export function TranscriptionPanel({
     // transcript が空のときは編集モードを自動で開く
     setIsEditMode(!audioTranscript);
     if (audioTranscript) onTranscriptUpdate?.(audioTranscript);
-  }, [audioTranscript]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [audioTranscript, onTranscriptUpdate]);
+
+  // モード切り替え時に進行中の録音を停止（リソースリーク防止）
+  useEffect(() => {
+    return () => {
+      audio.stopRecording();
+      speech.stopRecording();
+    };
+  }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // テキストモード: エントリが増えるたびに親へ通知
   useEffect(() => {

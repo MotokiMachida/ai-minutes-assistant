@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface UseAudioAnalysisReturn {
   isRecording: boolean;
@@ -121,6 +121,18 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
   const clearBlob = useCallback(() => {
     setAudioBlob(null);
     setAudioDuration(0);
+  }, []);
+
+  // アンマウント時にすべてのリソースを確実に解放
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current?.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      sysStreamRef.current?.getTracks().forEach((t) => t.stop());
+      audioContextRef.current?.close();
+    };
   }, []);
 
   return {
