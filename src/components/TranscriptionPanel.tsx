@@ -24,8 +24,8 @@ interface TranscriptionPanelProps {
   onTranscriptUpdate?: (fullText: string) => void;
   /** 高精度音声モード: 録音停止後に Blob を通知 */
   onAudioReady?: (blob: Blob) => void;
-  /** 音声分析後のトランスクリプト（表示・編集用） */
-  audioTranscript?: string;
+  /** 音声分析後のトランスクリプト（null=未分析、string=分析済み） */
+  audioTranscript?: string | null;
 }
 
 function formatDuration(seconds: number): string {
@@ -81,12 +81,14 @@ export function TranscriptionPanel({
   const colorMapRef = useRef(new Map<string, string>());
 
   // audioTranscript prop が更新されたら（Gemini から返った）ローカル状態を初期化
+  // null = 未分析なのでスキップ、string（空文字含む）= 分析済みとして扱う
   useEffect(() => {
-    if (!audioTranscript) return;
-    colorMapRef.current = new Map(); // 新しいトランスクリプトで色をリセット
+    if (audioTranscript === null || audioTranscript === undefined) return;
+    colorMapRef.current = new Map();
     setEditableTranscript(audioTranscript);
-    setIsEditMode(false);
-    onTranscriptUpdate?.(audioTranscript); // 親にも初期値として通知
+    // transcript が空のときは編集モードを自動で開く
+    setIsEditMode(!audioTranscript);
+    if (audioTranscript) onTranscriptUpdate?.(audioTranscript);
   }, [audioTranscript]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // テキストモード: エントリが増えるたびに親へ通知
@@ -383,8 +385,8 @@ export function TranscriptionPanel({
                 </div>
               </div>
 
-              {/* トランスクリプトエリア */}
-              {editableTranscript ? (
+              {/* トランスクリプトエリア（分析済みなら空でも表示） */}
+              {audioTranscript !== null && audioTranscript !== undefined ? (
                 <div className="flex-1 overflow-y-auto">
                   {isEditMode ? (
                     /* 編集モード: textarea */
@@ -395,6 +397,7 @@ export function TranscriptionPanel({
                       <textarea
                         value={editableTranscript}
                         onChange={(e) => handleTranscriptEdit(e.target.value)}
+                        placeholder="Gemini からトランスクリプトが返されませんでした。ここに手動で内容を入力すると再分析できます。"
                         className="flex-1 text-sm text-gray-700 leading-relaxed border border-purple-200 rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 font-mono"
                         spellCheck={false}
                       />

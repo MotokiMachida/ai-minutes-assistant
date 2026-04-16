@@ -33,10 +33,12 @@ interface AnalysisPanelProps {
 export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetingInfo, onAudioTranscriptReady }: AnalysisPanelProps) {
   const { result, audioTranscript, status, errorMessage, analyze, analyzeAudio, reset } = useAnalysis();
 
-  // 音声分析でトランスクリプトが得られたら親へ通知
+  // 音声モードの分析が完了したらトランスクリプト（空文字含む）を親へ通知
   useEffect(() => {
-    if (audioTranscript) onAudioTranscriptReady?.(audioTranscript);
-  }, [audioTranscript, onAudioTranscriptReady]);
+    if (status === 'success' && mode === 'audio') {
+      onAudioTranscriptReady?.(audioTranscript);
+    }
+  }, [status, mode, audioTranscript, onAudioTranscriptReady]);
 
   const handleExport = useCallback(() => {
     if (!result) return;
