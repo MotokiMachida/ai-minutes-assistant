@@ -111,15 +111,16 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
 
   const handleAnalyze = useCallback(() => {
     setChecked({});
+    const title = meetingInfo?.title?.trim() || undefined;
     if (transcriptText?.trim()) {
       // テキストモード、または音声モードで編集済み／取得済みトランスクリプトがある場合
       // → 手動編集を優先してテキストで分析
-      analyze(transcriptText);
+      analyze(transcriptText, title);
     } else if (mode === 'audio' && audioBlob) {
       // 音声モードの初回分析（トランスクリプト未取得）→ 音声Blobを直接送信
-      analyzeAudio(audioBlob);
+      analyzeAudio(audioBlob, title);
     }
-  }, [mode, audioBlob, transcriptText, analyze, analyzeAudio]);
+  }, [mode, audioBlob, transcriptText, meetingInfo, analyze, analyzeAudio]);
 
   const handleReset = useCallback(() => {
     reset();

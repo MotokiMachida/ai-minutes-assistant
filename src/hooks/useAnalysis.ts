@@ -8,8 +8,8 @@ interface UseAnalysisReturn {
   audioTranscript: string;
   status: AnalysisStatus;
   errorMessage: string | null;
-  analyze: (text: string) => Promise<void>;
-  analyzeAudio: (blob: Blob) => Promise<void>;
+  analyze: (text: string, meetingTitle?: string) => Promise<void>;
+  analyzeAudio: (blob: Blob, meetingTitle?: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -19,12 +19,12 @@ export function useAnalysis(): UseAnalysisReturn {
   const [status, setStatus] = useState<AnalysisStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const analyze = useCallback(async (text: string) => {
+  const analyze = useCallback(async (text: string, meetingTitle?: string) => {
     if (!text.trim()) return;
     setStatus('loading');
     setErrorMessage(null);
     try {
-      const data = await analyzeTranscript(text);
+      const data = await analyzeTranscript(text, meetingTitle);
       setResult(data);
       setStatus('success');
     } catch (err) {
@@ -34,11 +34,11 @@ export function useAnalysis(): UseAnalysisReturn {
     }
   }, []);
 
-  const analyzeAudio = useCallback(async (blob: Blob) => {
+  const analyzeAudio = useCallback(async (blob: Blob, meetingTitle?: string) => {
     setStatus('loading');
     setErrorMessage(null);
     try {
-      const data = await analyzeAudioService(blob);
+      const data = await analyzeAudioService(blob, meetingTitle);
       setAudioTranscript(data.transcript ?? '');
       setResult(data);
       setStatus('success');

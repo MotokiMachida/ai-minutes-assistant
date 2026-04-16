@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { transcriptText } = req.body as { transcriptText?: string };
+  const { transcriptText, meetingTitle } = req.body as { transcriptText?: string; meetingTitle?: string };
   if (!transcriptText) {
     return res.status(400).json({ error: 'transcriptText is required' });
   }
@@ -57,12 +57,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
+      const meetingContext = meetingTitle?.trim()
+        ? `会議名: ${meetingTitle.trim()}\n\n`
+        : '';
+
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: [
           {
             role: 'user',
-            parts: [{ text: `${SYSTEM_PROMPT}\n\n---\n\n${transcriptText}` }],
+            parts: [{ text: `${SYSTEM_PROMPT}\n\n---\n\n${meetingContext}${transcriptText}` }],
           },
         ],
       });
