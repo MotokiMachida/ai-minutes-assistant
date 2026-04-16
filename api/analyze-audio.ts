@@ -1,10 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
+import { buildAudioPart } from './_gemini-audio';
 
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '20mb',
+      sizeLimit: '50mb',
     },
   },
 };
@@ -61,56 +62,66 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const ai = new GoogleGenAI({ apiKey });
 
+  // ファイルサイズに応じて inlineData / Files API を選択
+  let audioPart: Awaited<ReturnType<typeof buildAudioPart>>[0];
+  let cleanup: () => Promise<void>;
+  try {
+    [audioPart, cleanup] = await buildAudioPart(ai, audioBase64, mimeType);
+  } catch (err) {
+    console.error('[/api/analyze-audio] audio upload failed', err);
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ error: message });
+  }
+
   const MAX_RETRIES = 3;
   let lastErr: unknown;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const meetingContext = meetingTitle?.trim()
-        ? `会議名: ${meetingTitle.trim()}\n\n`
-        : '';
+  try {
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        const meetingContext = meetingTitle?.trim()
+          ? `会議名: ${meetingTitle.trim()}\n\n`
+          : '';
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { text: SYSTEM_PROMPT + (meetingContext ? `\n\n${meetingContext}` : '') },
-              {
-                inlineData: {
-                  mimeType,
-                  data: audioBase64,
-                },
-              },
-            ],
-          },
-        ],
-      });
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { text: SYSTEM_PROMPT + (meetingContext ? `\n\n${meetingContext}` : '') },
+                audioPart,
+              ],
+            },
+          ],
+        });
 
-      const raw = response.text ?? '';
-      const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-      const parsed = JSON.parse(cleaned) as unknown;
+        const raw = response.text ?? '';
+        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const parsed = JSON.parse(cleaned) as unknown;
 
-      return res.status(200).json(parsed);
-    } catch (err) {
-      lastErr = err;
-      const status =
-        typeof (err as Record<string, unknown>).status === 'number'
-          ? ((err as Record<string, unknown>).status as number)
-          : 500;
+        return res.status(200).json(parsed);
+      } catch (err) {
+        lastErr = err;
+        const status =
+          typeof (err as Record<string, unknown>).status === 'number'
+            ? ((err as Record<string, unknown>).status as number)
+            : 500;
 
-      if (status === 429 && attempt < MAX_RETRIES - 1) {
-        const delay = Math.pow(2, attempt) * 1000;
-        console.warn(`[/api/analyze-audio] 429 rate limit, retry ${attempt + 1} in ${delay}ms`);
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
+        if (status === 429 && attempt < MAX_RETRIES - 1) {
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`[/api/analyze-audio] 429 rate limit, retry ${attempt + 1} in ${delay}ms`);
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+
+        console.error('[/api/analyze-audio]', err);
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        return res.status(status).json({ error: message });
       }
-
-      console.error('[/api/analyze-audio]', err);
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      return res.status(status).json({ error: message });
     }
+  } finally {
+    await cleanup();
   }
 
   const message = lastErr instanceof Error ? lastErr.message : 'Unknown error';
