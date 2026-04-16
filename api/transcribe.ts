@@ -1,11 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
+import { buildAudioPart } from './_gemini-audio';
 
 // Increase body size limit — audio base64 can exceed Vercel's 1MB default
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '20mb',
+      sizeLimit: '50mb',
     },
   },
 };
@@ -25,9 +26,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server' });
   }
 
+  const ai = new GoogleGenAI({ apiKey });
+  let cleanup: () => Promise<void> = async () => {};
+
   try {
-    const ai = new GoogleGenAI({ apiKey });
-    const baseMime = mimeType.split(';')[0];
+    const [audioPart, cleanupFn] = await buildAudioPart(ai, audioBase64, mimeType);
+    cleanup = cleanupFn;
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.0-flash',
@@ -35,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         {
           role: 'user',
           parts: [
-            { inlineData: { mimeType: baseMime, data: audioBase64 } },
+            audioPart,
             {
               text: 'この音声を日本語で正確に文字起こしししてください。話された日本語の内容のみを返してください。音声がない・無音・聞き取れない場合は必ず空文字のみを返してください。余計な説明や補足は不要です。',
             },
@@ -52,5 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : 500;
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(httpStatus).json({ error: message });
+  } finally {
+    await cleanup();
   }
 }
