@@ -5,6 +5,7 @@ type AnalysisStatus = 'idle' | 'loading' | 'success' | 'error';
 
 interface UseAnalysisReturn {
   result: AnalysisResult | null;
+  audioTranscript: string;
   status: AnalysisStatus;
   errorMessage: string | null;
   analyze: (text: string) => Promise<void>;
@@ -14,6 +15,7 @@ interface UseAnalysisReturn {
 
 export function useAnalysis(): UseAnalysisReturn {
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [audioTranscript, setAudioTranscript] = useState('');
   const [status, setStatus] = useState<AnalysisStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -37,6 +39,7 @@ export function useAnalysis(): UseAnalysisReturn {
     setErrorMessage(null);
     try {
       const data = await analyzeAudioService(blob);
+      setAudioTranscript(data.transcript ?? '');
       setResult(data);
       setStatus('success');
     } catch (err) {
@@ -48,9 +51,10 @@ export function useAnalysis(): UseAnalysisReturn {
 
   const reset = useCallback(() => {
     setResult(null);
+    setAudioTranscript('');
     setStatus('idle');
     setErrorMessage(null);
   }, []);
 
-  return { result, status, errorMessage, analyze, analyzeAudio, reset };
+  return { result, audioTranscript, status, errorMessage, analyze, analyzeAudio, reset };
 }

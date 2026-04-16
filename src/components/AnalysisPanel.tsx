@@ -10,7 +10,7 @@ import {
   MessageSquareText,
   Download,
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useAnalysis } from '../hooks/useAnalysis';
 import type { MeetingInfo } from '../App';
 import type { RecordingMode } from './TranscriptionPanel';
@@ -26,10 +26,17 @@ interface AnalysisPanelProps {
   audioBlob?: Blob | null;
   mode?: RecordingMode;
   meetingInfo?: MeetingInfo;
+  /** 音声分析で得られたトランスクリプトを親へ通知 */
+  onAudioTranscriptReady?: (transcript: string) => void;
 }
 
-export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetingInfo }: AnalysisPanelProps) {
-  const { result, status, errorMessage, analyze, analyzeAudio, reset } = useAnalysis();
+export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetingInfo, onAudioTranscriptReady }: AnalysisPanelProps) {
+  const { result, audioTranscript, status, errorMessage, analyze, analyzeAudio, reset } = useAnalysis();
+
+  // 音声分析でトランスクリプトが得られたら親へ通知
+  useEffect(() => {
+    if (audioTranscript) onAudioTranscriptReady?.(audioTranscript);
+  }, [audioTranscript, onAudioTranscriptReady]);
 
   const handleExport = useCallback(() => {
     if (!result) return;
@@ -104,10 +111,13 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
 
   const handleAnalyze = useCallback(() => {
     setChecked({});
-    if (mode === 'audio' && audioBlob) {
-      analyzeAudio(audioBlob);
-    } else if (transcriptText) {
+    if (transcriptText?.trim()) {
+      // テキストモード、または音声モードで編集済み／取得済みトランスクリプトがある場合
+      // → 手動編集を優先してテキストで分析
       analyze(transcriptText);
+    } else if (mode === 'audio' && audioBlob) {
+      // 音声モードの初回分析（トランスクリプト未取得）→ 音声Blobを直接送信
+      analyzeAudio(audioBlob);
     }
   }, [mode, audioBlob, transcriptText, analyze, analyzeAudio]);
 
@@ -118,7 +128,7 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
 
   const isLoading = status === 'loading';
   const hasResult = status === 'success' && result !== null;
-  const canAnalyze = (mode === 'audio' ? !!audioBlob : !!transcriptText?.trim()) && !isLoading;
+  const canAnalyze = (!!transcriptText?.trim() || (mode === 'audio' && !!audioBlob)) && !isLoading;
   const pendingCount = result ? result.todos.filter((_, i) => !checked[i]).length : 0;
 
   return (

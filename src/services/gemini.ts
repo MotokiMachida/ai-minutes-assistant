@@ -45,7 +45,11 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function analyzeAudio(blob: Blob): Promise<AnalysisResult> {
+export interface AudioAnalysisResult extends AnalysisResult {
+  transcript: string;
+}
+
+export async function analyzeAudio(blob: Blob): Promise<AudioAnalysisResult> {
   const audioBase64 = await blobToBase64(blob);
-  return apiPost<AnalysisResult>('/api/analyze-audio', { audioBase64, mimeType: blob.type || 'audio/webm' });
+  return apiPost<AudioAnalysisResult>('/api/analyze-audio', { audioBase64, mimeType: blob.type || 'audio/webm' });
 }

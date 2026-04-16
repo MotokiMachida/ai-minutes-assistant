@@ -21,6 +21,7 @@ function nowTime() {
 function App() {
   const [transcriptText, setTranscriptText] = useState('');
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioTranscript, setAudioTranscript] = useState('');
   const [mode, setMode] = useState<RecordingMode>('text');
   const [meetingInfo, setMeetingInfo] = useState<MeetingInfo>({
     title: '',
@@ -37,13 +38,20 @@ function App() {
     setAudioBlob(blob);
   }, []);
 
+  const handleAudioTranscriptReady = useCallback((transcript: string) => {
+    setAudioTranscript(transcript);
+    setTranscriptText(transcript); // 再分析のベーステキストとして設定
+  }, []);
+
   const handleModeChange = useCallback((newMode: RecordingMode) => {
     setMode(newMode);
     // モード切り替え時に前のデータをクリア
     if (newMode === 'audio') {
       setTranscriptText('');
+      setAudioTranscript('');
     } else {
       setAudioBlob(null);
+      setAudioTranscript('');
     }
   }, []);
 
@@ -109,6 +117,7 @@ function App() {
             onModeChange={handleModeChange}
             onTranscriptUpdate={handleTranscriptUpdate}
             onAudioReady={handleAudioReady}
+            audioTranscript={audioTranscript}
           />
         </section>
         <section className="w-96 flex-shrink-0 flex flex-col bg-white xl:w-[420px]">
@@ -117,6 +126,7 @@ function App() {
             audioBlob={audioBlob}
             mode={mode}
             meetingInfo={meetingInfo}
+            onAudioTranscriptReady={handleAudioTranscriptReady}
           />
         </section>
       </main>
