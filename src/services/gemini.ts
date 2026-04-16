@@ -32,3 +32,20 @@ export async function transcribeAudio(audioBase64: string, mimeType: string): Pr
 export async function analyzeTranscript(transcriptText: string): Promise<AnalysisResult> {
   return apiPost<AnalysisResult>('/api/generate', { transcriptText });
 }
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      resolve(dataUrl.split(',')[1]); // data:audio/webm;base64,<here>
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function analyzeAudio(blob: Blob): Promise<AnalysisResult> {
+  const audioBase64 = await blobToBase64(blob);
+  return apiPost<AnalysisResult>('/api/analyze-audio', { audioBase64, mimeType: blob.type || 'audio/webm' });
+}

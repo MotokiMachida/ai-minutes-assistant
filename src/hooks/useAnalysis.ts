@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { analyzeTranscript, type AnalysisResult } from '../services/gemini';
+import { analyzeTranscript, analyzeAudio as analyzeAudioService, type AnalysisResult } from '../services/gemini';
 
 type AnalysisStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -8,6 +8,7 @@ interface UseAnalysisReturn {
   status: AnalysisStatus;
   errorMessage: string | null;
   analyze: (text: string) => Promise<void>;
+  analyzeAudio: (blob: Blob) => Promise<void>;
   reset: () => void;
 }
 
@@ -31,11 +32,25 @@ export function useAnalysis(): UseAnalysisReturn {
     }
   }, []);
 
+  const analyzeAudio = useCallback(async (blob: Blob) => {
+    setStatus('loading');
+    setErrorMessage(null);
+    try {
+      const data = await analyzeAudioService(blob);
+      setResult(data);
+      setStatus('success');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '不明なエラーが発生しました';
+      setErrorMessage(message);
+      setStatus('error');
+    }
+  }, []);
+
   const reset = useCallback(() => {
     setResult(null);
     setStatus('idle');
     setErrorMessage(null);
   }, []);
 
-  return { result, status, errorMessage, analyze, reset };
+  return { result, status, errorMessage, analyze, analyzeAudio, reset };
 }

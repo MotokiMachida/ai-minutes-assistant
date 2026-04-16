@@ -13,6 +13,7 @@ import {
 import { useState, useCallback } from 'react';
 import { useAnalysis } from '../hooks/useAnalysis';
 import type { MeetingInfo } from '../App';
+import type { RecordingMode } from './TranscriptionPanel';
 
 type SectionKey = 'summary' | 'todos' | 'decisions';
 
@@ -22,11 +23,13 @@ interface CheckedTodos {
 
 interface AnalysisPanelProps {
   transcriptText?: string;
+  audioBlob?: Blob | null;
+  mode?: RecordingMode;
   meetingInfo?: MeetingInfo;
 }
 
-export function AnalysisPanel({ transcriptText, meetingInfo }: AnalysisPanelProps) {
-  const { result, status, errorMessage, analyze, reset } = useAnalysis();
+export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetingInfo }: AnalysisPanelProps) {
+  const { result, status, errorMessage, analyze, analyzeAudio, reset } = useAnalysis();
 
   const handleExport = useCallback(() => {
     if (!result) return;
@@ -100,11 +103,13 @@ export function AnalysisPanel({ transcriptText, meetingInfo }: AnalysisPanelProp
     setChecked((prev) => ({ ...prev, [index]: !prev[index] }));
 
   const handleAnalyze = useCallback(() => {
-    if (transcriptText) {
-      setChecked({});
+    setChecked({});
+    if (mode === 'audio' && audioBlob) {
+      analyzeAudio(audioBlob);
+    } else if (transcriptText) {
       analyze(transcriptText);
     }
-  }, [transcriptText, analyze]);
+  }, [mode, audioBlob, transcriptText, analyze, analyzeAudio]);
 
   const handleReset = useCallback(() => {
     reset();
@@ -113,7 +118,7 @@ export function AnalysisPanel({ transcriptText, meetingInfo }: AnalysisPanelProp
 
   const isLoading = status === 'loading';
   const hasResult = status === 'success' && result !== null;
-  const canAnalyze = !!transcriptText?.trim() && !isLoading;
+  const canAnalyze = (mode === 'audio' ? !!audioBlob : !!transcriptText?.trim()) && !isLoading;
   const pendingCount = result ? result.todos.filter((_, i) => !checked[i]).length : 0;
 
   return (
@@ -160,27 +165,32 @@ export function AnalysisPanel({ transcriptText, meetingInfo }: AnalysisPanelProp
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {/* Idle / no transcript state */}
-        {status === 'idle' && !transcriptText && (
+        {/* Idle / no input state */}
+        {status === 'idle' && !canAnalyze && (
           <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 gap-3">
             <MessageSquareText className="w-8 h-8 opacity-30" />
             <p className="text-sm">
-              左パネルで録音を開始すると<br />
-              「分析開始」ボタンが有効になります
+              {mode === 'audio'
+                ? <>左パネルで録音を完了すると<br />「分析開始」ボタンが有効になります</>
+                : <>左パネルで録音を開始すると<br />「分析開始」ボタンが有効になります</>}
             </p>
           </div>
         )}
 
-        {/* Transcript ready but not yet analyzed */}
-        {status === 'idle' && transcriptText && (
+        {/* Input ready but not yet analyzed */}
+        {status === 'idle' && canAnalyze && (
           <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-            <Sparkles className="w-8 h-8 text-blue-300" />
+            <Sparkles className={`w-8 h-8 ${mode === 'audio' ? 'text-purple-300' : 'text-blue-300'}`} />
             <p className="text-sm text-gray-500">
-              文字起こしが準備できました
+              {mode === 'audio' ? '録音が完了しました' : '文字起こしが準備できました'}
             </p>
             <button
               onClick={handleAnalyze}
-              className="mt-1 flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-full hover:bg-blue-700 transition-colors shadow-sm"
+              className={`mt-1 flex items-center gap-2 px-4 py-2 text-white text-sm font-medium rounded-full transition-colors shadow-sm ${
+                mode === 'audio'
+                  ? 'bg-purple-600 hover:bg-purple-700'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              }`}
             >
               <Sparkles className="w-4 h-4" />
               Gemini で分析する

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { FileText, Clock, Users } from 'lucide-react';
-import { TranscriptionPanel } from './components/TranscriptionPanel';
+import { TranscriptionPanel, type RecordingMode } from './components/TranscriptionPanel';
 import { AnalysisPanel } from './components/AnalysisPanel';
 
 export interface MeetingInfo {
@@ -20,6 +20,8 @@ function nowTime() {
 
 function App() {
   const [transcriptText, setTranscriptText] = useState('');
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [mode, setMode] = useState<RecordingMode>('text');
   const [meetingInfo, setMeetingInfo] = useState<MeetingInfo>({
     title: '',
     date: todayDate(),
@@ -29,6 +31,20 @@ function App() {
 
   const handleTranscriptUpdate = useCallback((text: string) => {
     setTranscriptText(text);
+  }, []);
+
+  const handleAudioReady = useCallback((blob: Blob) => {
+    setAudioBlob(blob);
+  }, []);
+
+  const handleModeChange = useCallback((newMode: RecordingMode) => {
+    setMode(newMode);
+    // モード切り替え時に前のデータをクリア
+    if (newMode === 'audio') {
+      setTranscriptText('');
+    } else {
+      setAudioBlob(null);
+    }
   }, []);
 
   const set = (key: keyof MeetingInfo) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -88,10 +104,20 @@ function App() {
       {/* Main Content — 2-column split layout */}
       <main className="flex-1 flex overflow-hidden">
         <section className="flex-1 flex flex-col min-w-0 bg-white border-r border-gray-200">
-          <TranscriptionPanel onTranscriptUpdate={handleTranscriptUpdate} />
+          <TranscriptionPanel
+            mode={mode}
+            onModeChange={handleModeChange}
+            onTranscriptUpdate={handleTranscriptUpdate}
+            onAudioReady={handleAudioReady}
+          />
         </section>
         <section className="w-96 flex-shrink-0 flex flex-col bg-white xl:w-[420px]">
-          <AnalysisPanel transcriptText={transcriptText} meetingInfo={meetingInfo} />
+          <AnalysisPanel
+            transcriptText={transcriptText}
+            audioBlob={audioBlob}
+            mode={mode}
+            meetingInfo={meetingInfo}
+          />
         </section>
       </main>
     </div>
