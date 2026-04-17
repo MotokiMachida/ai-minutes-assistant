@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Pencil,
   Eye,
+  Download,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
@@ -134,6 +135,22 @@ export function TranscriptionPanel({
     setIsEditMode(false);
     onTranscriptUpdate?.('');
   };
+
+  const handleDownload = (blob: Blob, index: number) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `recording-${index}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 録音中は全件、停止後は最新以外を「過去の録音」として表示
+  const pastRecordings = audio.isRecording
+    ? audio.recordings
+    : audio.recordings.slice(0, -1);
 
   return (
     <div className="flex flex-col h-full">
@@ -322,8 +339,31 @@ export function TranscriptionPanel({
       {/* ---- 高精度音声モード ---- */}
       {mode === 'audio' && (
         <>
+          {/* 過去の録音リスト（録音中 or 2回目以降） */}
+          {pastRecordings.length > 0 && (
+            <div className="border-b border-gray-100 divide-y divide-gray-100">
+              {pastRecordings.map((rec, i) => (
+                <div key={rec.id} className="flex items-center justify-between px-4 py-2 bg-gray-50">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-400" />
+                    <span className="text-xs text-gray-500">
+                      録音 {i + 1} — {formatDuration(rec.duration)} ／ {(rec.blob.size / 1024).toFixed(0)} KB
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => handleDownload(rec.blob, i + 1)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
+                  >
+                    <Download className="w-3 h-3" />
+                    DL
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* 録音前 / 録音中 */}
-          {!audio.audioBlob && (
+          {(!audio.audioBlob || audio.isRecording) && (
             <div className="flex-1 flex flex-col items-center justify-center px-6 py-4 text-center gap-4">
               {!audio.isRecording ? (
                 <>
@@ -359,18 +399,26 @@ export function TranscriptionPanel({
             </div>
           )}
 
-          {/* 録音完了 + トランスクリプト表示 */}
-          {audio.audioBlob && (
+          {/* 録音完了 + トランスクリプト表示（最新録音・停止後のみ） */}
+          {audio.audioBlob && !audio.isRecording && (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* 録音完了バー */}
               <div className="flex items-center justify-between px-4 py-2 bg-emerald-50 border-b border-emerald-100">
                 <div className="flex items-center gap-2">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                   <span className="text-xs text-emerald-700 font-medium">
-                    録音完了 — {formatDuration(audio.audioDuration)} ／ {(audio.audioBlob.size / 1024).toFixed(0)} KB
+                    {audio.recordings.length > 1 ? `録音 ${audio.recordings.length} — ` : '録音完了 — '}
+                    {formatDuration(audio.audioDuration)} ／ {(audio.audioBlob.size / 1024).toFixed(0)} KB
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => handleDownload(audio.audioBlob!, audio.recordings.length)}
+                    className="flex items-center gap-1 px-2 py-1 text-xs text-emerald-600 border border-emerald-200 rounded-md hover:bg-emerald-100 transition-colors"
+                  >
+                    <Download className="w-3 h-3" />
+                    DL
+                  </button>
                   {editableTranscript && (
                     <button
                       onClick={() => setIsEditMode((v) => !v)}

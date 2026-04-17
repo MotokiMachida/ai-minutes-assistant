@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+export interface Recording {
+  id: string;
+  blob: Blob;
+  duration: number;
+}
+
 export interface UseAudioAnalysisReturn {
   isRecording: boolean;
   isSupported: boolean;
   audioBlob: Blob | null;
-  audioDuration: number; // seconds
+  audioDuration: number;
+  recordings: Recording[];
   error: string | null;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
@@ -15,6 +22,7 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioDuration, setAudioDuration] = useState(0);
+  const [recordings, setRecordings] = useState<Recording[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -32,7 +40,7 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
   const startRecording = useCallback(async () => {
     if (isRecording) return;
     setError(null);
-    setAudioBlob(null);
+    // audioBlob は保持したまま新録音を開始（前の録音ファイルを消さない）
     chunksRef.current = [];
 
     try {
@@ -82,9 +90,11 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
 
       recorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mimeType });
+        const duration = Math.round((Date.now() - startTimeRef.current) / 1000);
         setAudioBlob(blob);
-        setAudioDuration(Math.round((Date.now() - startTimeRef.current) / 1000));
+        setAudioDuration(duration);
         setIsRecording(false);
+        setRecordings((prev) => [...prev, { id: `rec-${Date.now()}`, blob, duration }]);
         // リソースを解放
         micStreamRef.current?.getTracks().forEach((t) => t.stop());
         sysStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -121,6 +131,7 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
   const clearBlob = useCallback(() => {
     setAudioBlob(null);
     setAudioDuration(0);
+    setRecordings([]);
   }, []);
 
   // アンマウント時にすべてのリソースを確実に解放
@@ -140,6 +151,7 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
     isSupported,
     audioBlob,
     audioDuration,
+    recordings,
     error,
     startRecording,
     stopRecording,

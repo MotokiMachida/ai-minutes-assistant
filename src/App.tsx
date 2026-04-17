@@ -36,6 +36,7 @@ function App() {
 
   const handleAudioReady = useCallback((blob: Blob) => {
     setAudioBlob(blob);
+    setAudioTranscript(null); // 新録音が来たら分析状態をリセット
   }, []);
 
   const handleAudioTranscriptReady = useCallback((transcript: string) => {
