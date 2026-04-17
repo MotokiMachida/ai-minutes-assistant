@@ -80,7 +80,7 @@ export async function analyzeAudioChunked(
   }
 
   // 各チャンクを順次文字起こし（429 レート制限対策のディレイ＋リトライ付き）
-  const INTER_CHUNK_DELAY_MS = 1500; // チャンク間の固定ウェイト
+  const INTER_CHUNK_DELAY_MS = 2000; // チャンク間の固定ウェイト
   const MAX_RETRIES = 3;
 
   const transcripts: string[] = [];
