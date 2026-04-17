@@ -172,9 +172,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ? ((err as Record<string, unknown>).status as number)
             : 500;
 
-        if (status === 429 && attempt < MAX_RETRIES - 1) {
+        if ((status === 429 || status === 503) && attempt < MAX_RETRIES - 1) {
           const delay = Math.pow(2, attempt) * 1000;
-          console.warn(`[/api/analyze-audio] 429 rate limit, retry ${attempt + 1} in ${delay}ms`);
+          console.warn(`[/api/analyze-audio] ${status} error, retry ${attempt + 1} in ${delay}ms`);
           await new Promise((r) => setTimeout(r, delay));
           continue;
         }

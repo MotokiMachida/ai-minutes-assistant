@@ -11,10 +11,11 @@ import {
   Pencil,
   Eye,
   Download,
+  X,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
-import { useAudioAnalysis } from '../hooks/useAudioAnalysis';
+import { useAudioAnalysis, type Recording } from '../hooks/useAudioAnalysis';
 
 export type RecordingMode = 'text' | 'audio';
 
@@ -25,6 +26,8 @@ interface TranscriptionPanelProps {
   onTranscriptUpdate?: (fullText: string) => void;
   /** 高精度音声モード: 録音停止後に Blob を通知 */
   onAudioReady?: (blob: Blob) => void;
+  /** ユーザーが分析対象録音を切り替えたときに通知 */
+  onAudioSelect?: (blob: Blob | null) => void;
   /** 音声分析後のトランスクリプト（null=未分析、string=分析済み） */
   audioTranscript?: string | null;
 }
@@ -65,6 +68,7 @@ export function TranscriptionPanel({
   onModeChange,
   onTranscriptUpdate,
   onAudioReady,
+  onAudioSelect,
   audioTranscript,
 }: TranscriptionPanelProps) {
   // テキストモード用
@@ -80,6 +84,10 @@ export function TranscriptionPanel({
   const [isEditMode, setIsEditMode] = useState(false);
   // 話者→色のマッピング（レンダリングごとに安定させるため useRef）
   const colorMapRef = useRef(new Map<string, string>());
+
+  // 分析対象として選択中の録音ID
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const prevRecordingsLenRef = useRef(0);
 
   // audioTranscript prop が更新されたら（Gemini から返った）ローカル状態を初期化
   // null = 未分析なのでスキップ、string（空文字含む）= 分析済みとして扱う
@@ -129,11 +137,42 @@ export function TranscriptionPanel({
     onTranscriptUpdate?.(text);
   };
 
-  const handleClearAudio = () => {
-    audio.clearBlob();
+  // 新録音が追加されたら自動的に最新を選択
+  useEffect(() => {
+    const len = audio.recordings.length;
+    if (len > prevRecordingsLenRef.current && len > 0) {
+      setSelectedId(audio.recordings[len - 1].id);
+    }
+    prevRecordingsLenRef.current = len;
+  }, [audio.recordings.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectRecording = (rec: Recording) => {
+    setSelectedId(rec.id);
+    onAudioSelect?.(rec.blob);
+    // 選択変更時はトランスクリプトをリセット
     setEditableTranscript('');
     setIsEditMode(false);
     onTranscriptUpdate?.('');
+  };
+
+  const handleRemoveRecording = (id: string) => {
+    const remaining = audio.recordings.filter((r) => r.id !== id);
+    const isSelected = selectedId === id;
+    audio.removeRecording(id);
+    if (remaining.length === 0) {
+      setSelectedId(null);
+      setEditableTranscript('');
+      setIsEditMode(false);
+      onTranscriptUpdate?.('');
+      onAudioSelect?.(null);
+    } else if (isSelected) {
+      const newLatest = remaining[remaining.length - 1];
+      setSelectedId(newLatest.id);
+      onAudioSelect?.(newLatest.blob);
+      setEditableTranscript('');
+      setIsEditMode(false);
+      onTranscriptUpdate?.('');
+    }
   };
 
   const handleDownload = (blob: Blob, index: number) => {
@@ -342,23 +381,49 @@ export function TranscriptionPanel({
           {/* 過去の録音リスト（録音中 or 2回目以降） */}
           {pastRecordings.length > 0 && (
             <div className="border-b border-gray-100 divide-y divide-gray-100">
-              {pastRecordings.map((rec, i) => (
-                <div key={rec.id} className="flex items-center justify-between px-4 py-2 bg-gray-50">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-gray-400" />
-                    <span className="text-xs text-gray-500">
-                      録音 {i + 1} — {formatDuration(rec.duration)} ／ {(rec.blob.size / 1024).toFixed(0)} KB
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleDownload(rec.blob, i + 1)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
+              {pastRecordings.map((rec, i) => {
+                const isSelected = selectedId === rec.id;
+                return (
+                  <div
+                    key={rec.id}
+                    onClick={() => !audio.isRecording && handleSelectRecording(rec)}
+                    className={`flex items-center justify-between px-4 py-2 transition-colors ${
+                      isSelected
+                        ? 'bg-blue-50 border-l-2 border-blue-400'
+                        : audio.isRecording
+                          ? 'bg-gray-50'
+                          : 'bg-gray-50 hover:bg-gray-100 cursor-pointer'
+                    }`}
                   >
-                    <Download className="w-3 h-3" />
-                    DL
-                  </button>
-                </div>
-              ))}
+                    <div className="flex items-center gap-2">
+                      {!audio.isRecording && audio.recordings.length > 1 && (
+                        <div className={`w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 ${
+                          isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                        }`} />
+                      )}
+                      <CheckCircle2 className={`w-3.5 h-3.5 ${isSelected ? 'text-blue-400' : 'text-gray-400'}`} />
+                      <span className={`text-xs ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-500'}`}>
+                        録音 {i + 1} — {formatDuration(rec.duration)} ／ {(rec.blob.size / 1024).toFixed(0)} KB
+                        {isSelected && <span className="ml-1.5 text-blue-400">（分析対象）</span>}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleDownload(rec.blob, i + 1)}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 border border-gray-200 rounded-md hover:bg-gray-100 transition-colors"
+                      >
+                        <Download className="w-3 h-3" /> DL
+                      </button>
+                      <button
+                        onClick={() => handleRemoveRecording(rec.id)}
+                        className="flex items-center px-1.5 py-1 text-xs text-gray-400 border border-gray-200 rounded-md hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -403,43 +468,65 @@ export function TranscriptionPanel({
           {audio.audioBlob && !audio.isRecording && (
             <div className="flex-1 flex flex-col overflow-hidden">
               {/* 録音完了バー */}
-              <div className="flex items-center justify-between px-4 py-2 bg-emerald-50 border-b border-emerald-100">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="text-xs text-emerald-700 font-medium">
-                    {audio.recordings.length > 1 ? `録音 ${audio.recordings.length} — ` : '録音完了 — '}
-                    {formatDuration(audio.audioDuration)} ／ {(audio.audioBlob.size / 1024).toFixed(0)} KB
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => handleDownload(audio.audioBlob!, audio.recordings.length)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs text-emerald-600 border border-emerald-200 rounded-md hover:bg-emerald-100 transition-colors"
+              {(() => {
+                const latestRec = audio.recordings[audio.recordings.length - 1];
+                const isSelected = selectedId === latestRec?.id;
+                const showSelector = audio.recordings.length > 1;
+                return (
+                  <div
+                    onClick={() => latestRec && !isSelected && handleSelectRecording(latestRec)}
+                    className={`flex items-center justify-between px-4 py-2 border-b transition-colors ${
+                      isSelected
+                        ? 'bg-blue-50 border-blue-100'
+                        : 'bg-emerald-50 border-emerald-100 cursor-pointer hover:bg-emerald-100'
+                    }`}
                   >
-                    <Download className="w-3 h-3" />
-                    DL
-                  </button>
-                  {editableTranscript && (
-                    <button
-                      onClick={() => setIsEditMode((v) => !v)}
-                      className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
-                        isEditMode
-                          ? 'bg-purple-100 text-purple-700 border-purple-200'
-                          : 'text-gray-500 border-gray-200 hover:bg-gray-50'
-                      }`}
-                    >
-                      {isEditMode ? <><Eye className="w-3 h-3" />表示</>: <><Pencil className="w-3 h-3" />編集</>}
-                    </button>
-                  )}
-                  <button
-                    onClick={handleClearAudio}
-                    className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
-                  >
-                    <Trash2 className="w-3 h-3" />
-                    クリア
-                  </button>
-                </div>
-              </div>
+                    <div className="flex items-center gap-2">
+                      {showSelector && (
+                        <div className={`w-2.5 h-2.5 rounded-full border-2 flex-shrink-0 ${
+                          isSelected ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
+                        }`} />
+                      )}
+                      <CheckCircle2 className={`w-3.5 h-3.5 ${isSelected ? 'text-blue-500' : 'text-emerald-500'}`} />
+                      <span className={`text-xs font-medium ${isSelected ? 'text-blue-700' : 'text-emerald-700'}`}>
+                        {audio.recordings.length > 1 ? `録音 ${audio.recordings.length} — ` : '録音完了 — '}
+                        {formatDuration(audio.audioDuration)} ／ {(audio.audioBlob.size / 1024).toFixed(0)} KB
+                        {isSelected && showSelector && <span className="ml-1.5 text-blue-400">（分析対象）</span>}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => handleDownload(audio.audioBlob!, audio.recordings.length)}
+                        className={`flex items-center gap-1 px-2 py-1 text-xs border rounded-md transition-colors ${
+                          isSelected
+                            ? 'text-blue-600 border-blue-200 hover:bg-blue-100'
+                            : 'text-emerald-600 border-emerald-200 hover:bg-emerald-100'
+                        }`}
+                      >
+                        <Download className="w-3 h-3" /> DL
+                      </button>
+                      {editableTranscript && (
+                        <button
+                          onClick={() => setIsEditMode((v) => !v)}
+                          className={`flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
+                            isEditMode
+                              ? 'bg-purple-100 text-purple-700 border-purple-200'
+                              : 'text-gray-500 border-gray-200 hover:bg-gray-50'
+                          }`}
+                        >
+                          {isEditMode ? <><Eye className="w-3 h-3" />表示</> : <><Pencil className="w-3 h-3" />編集</>}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => latestRec && handleRemoveRecording(latestRec.id)}
+                        className="flex items-center px-1.5 py-1 text-xs text-gray-400 border border-gray-200 rounded-md hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* トランスクリプトエリア（分析済みなら空でも表示） */}
               {audioTranscript !== null && audioTranscript !== undefined ? (

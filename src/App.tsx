@@ -36,7 +36,12 @@ function App() {
 
   const handleAudioReady = useCallback((blob: Blob) => {
     setAudioBlob(blob);
-    setAudioTranscript(null); // 新録音が来たら分析状態をリセット
+    setAudioTranscript(null);
+  }, []);
+
+  const handleAudioSelect = useCallback((blob: Blob | null) => {
+    setAudioBlob(blob);
+    setAudioTranscript(null);
   }, []);
 
   const handleAudioTranscriptReady = useCallback((transcript: string) => {
@@ -119,6 +124,7 @@ function App() {
             onModeChange={handleModeChange}
             onTranscriptUpdate={handleTranscriptUpdate}
             onAudioReady={handleAudioReady}
+            onAudioSelect={handleAudioSelect}
             audioTranscript={audioTranscript}
           />
         </section>

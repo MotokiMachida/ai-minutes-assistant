@@ -16,6 +16,7 @@ export interface UseAudioAnalysisReturn {
   startRecording: () => Promise<void>;
   stopRecording: () => void;
   clearBlob: () => void;
+  removeRecording: (id: string) => void;
 }
 
 export function useAudioAnalysis(): UseAudioAnalysisReturn {
@@ -134,6 +135,19 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
     setRecordings([]);
   }, []);
 
+  const removeRecording = useCallback((id: string) => {
+    setRecordings((prev) => {
+      const next = prev.filter((r) => r.id !== id);
+      // 削除したのが最新録音（= audioBlob）なら新しい最新に更新
+      if (prev.length > 0 && prev[prev.length - 1].id === id) {
+        const newLatest = next.length > 0 ? next[next.length - 1] : null;
+        setAudioBlob(newLatest?.blob ?? null);
+        setAudioDuration(newLatest?.duration ?? 0);
+      }
+      return next;
+    });
+  }, []);
+
   // アンマウント時にすべてのリソースを確実に解放
   useEffect(() => {
     return () => {
@@ -156,5 +170,6 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
     startRecording,
     stopRecording,
     clearBlob,
+    removeRecording,
   };
 }
