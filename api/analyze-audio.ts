@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 import type { Part } from '@google/genai';
-import { buildAudioPart } from './_gemini-audio';
+import { buildAudioPart } from '../lib/gemini-audio';
 
 export const config = {
   api: {
