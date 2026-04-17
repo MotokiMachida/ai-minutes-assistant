@@ -46,6 +46,24 @@ const SYSTEM_PROMPT = `あなたは会議の議事録作成アシスタントで
 - タスクや決定事項が見当たらない場合は空配列を返してください。
 - 音声が聞き取れない・会議内容でない場合は transcript と summary にその旨を記載し、配列は空にしてください。`;
 
+/**
+ * Gemini の応答テキストから JSON オブジェクトを抽出する。
+ * モデルが JSON の前後に余分なテキストや Markdown ブロックを付けた場合も対応。
+ */
+function extractJson(raw: string): unknown | null {
+  // 1. コードブロックを除去してそのまま parse
+  const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try { return JSON.parse(stripped); } catch { /* 次を試す */ }
+
+  // 2. テキスト中の最初の {...} ブロックを抽出
+  const braceMatch = raw.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try { return JSON.parse(braceMatch[0]); } catch { /* 次を試す */ }
+  }
+
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -98,8 +116,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         const raw = response.text ?? '';
-        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const parsed = JSON.parse(cleaned) as unknown;
+        const parsed = extractJson(raw);
+        if (!parsed) {
+          console.error('[/api/analyze-audio] Gemini non-JSON response:', raw.slice(0, 300));
+          // JSON 解析失敗はリトライしない（モデルの応答形式の問題）
+          return res.status(502).json({ error: 'Gemini から正しい形式の応答が得られませんでした。もう一度お試しください。' });
+        }
 
         return res.status(200).json(parsed);
       } catch (err) {
