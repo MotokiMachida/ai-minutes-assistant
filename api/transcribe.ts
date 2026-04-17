@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
-import { buildAudioPart } from '../lib/gemini-audio';
+import { buildAudioPart } from './lib/gemini-audio';
 
 // Increase body size limit — audio base64 can exceed Vercel's 1MB default
 export const config = {

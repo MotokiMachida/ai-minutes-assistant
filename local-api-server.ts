@@ -7,6 +7,7 @@ import express from 'express';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import generateHandler from './api/generate.js';
 import analyzeAudioHandler from './api/analyze-audio.js';
+import transcribeHandler from './api/transcribe.js';
 
 // .env.local を手動ロード（handler が process.env を参照するより前に実行）
 try {
@@ -26,8 +27,7 @@ try {
 }
 
 const app = express();
-// analyze-audio は最大 20MB の音声データを受け付ける
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 app.post('/api/generate', (req, res) => {
   generateHandler(req as unknown as VercelRequest, res as unknown as VercelResponse);
@@ -35,6 +35,10 @@ app.post('/api/generate', (req, res) => {
 
 app.post('/api/analyze-audio', (req, res) => {
   analyzeAudioHandler(req as unknown as VercelRequest, res as unknown as VercelResponse);
+});
+
+app.post('/api/transcribe', (req, res) => {
+  transcribeHandler(req as unknown as VercelRequest, res as unknown as VercelResponse);
 });
 
 const PORT = 3001;
