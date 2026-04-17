@@ -28,7 +28,8 @@ export async function buildAudioPart(
   const INLINE_LIMIT = 10 * 1024 * 1024; // 10 MB
 
   if (rawBytes < INLINE_LIMIT) {
-    const part: Part = { inlineData: { mimeType: baseMime, data: audioBase64 } };
+    // inlineData には元の mimeType をそのまま渡す（codecs 情報を保持して Gemini が正しく解釈できるようにする）
+    const part: Part = { inlineData: { mimeType, data: audioBase64 } };
     return [part, async () => {}];
   }
 

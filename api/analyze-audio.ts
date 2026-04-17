@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
+import type { Part } from '@google/genai';
 import { buildAudioPart } from './_gemini-audio';
 
 export const config = {
@@ -45,6 +46,22 @@ const SYSTEM_PROMPT = `あなたは会議の議事録作成アシスタントで
 - タスクや決定事項が見当たらない場合は空配列を返してください。
 - 音声が聞き取れない・会議内容でない場合は transcript と summary にその旨を記載し、配列は空にしてください。`;
 
+/**
+ * Gemini の応答テキストから JSON オブジェクトを抽出する。
+ * モデルが JSON の前後に余分なテキストや Markdown ブロックを付けた場合も対応。
+ */
+function extractJson(raw: string): unknown | null {
+  const stripped = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try { return JSON.parse(stripped); } catch { /* 次を試す */ }
+
+  const braceMatch = raw.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    try { return JSON.parse(braceMatch[0]); } catch { /* 次を試す */ }
+  }
+
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -63,14 +80,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ai = new GoogleGenAI({ apiKey });
 
   // ファイルサイズに応じて inlineData / Files API を選択
-  let audioPart: Awaited<ReturnType<typeof buildAudioPart>>[0];
-  let cleanup: () => Promise<void>;
+  let audioPart: Part;
+  let cleanup: () => Promise<void> = async () => {};
   try {
     [audioPart, cleanup] = await buildAudioPart(ai, audioBase64, mimeType);
   } catch (err) {
     console.error('[/api/analyze-audio] audio upload failed', err);
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return res.status(500).json({ error: message });
+    return res.status(500).json({ error: `音声の前処理に失敗しました: ${message}` });
   }
 
   const MAX_RETRIES = 3;
@@ -97,8 +114,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
 
         const raw = response.text ?? '';
-        const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-        const parsed = JSON.parse(cleaned) as unknown;
+        const parsed = extractJson(raw);
+        if (!parsed) {
+          console.error('[/api/analyze-audio] Gemini non-JSON response:', raw.slice(0, 300));
+          return res.status(502).json({ error: 'Gemini から正しい形式の応答が得られませんでした。もう一度お試しください。' });
+        }
 
         return res.status(200).json(parsed);
       } catch (err) {
