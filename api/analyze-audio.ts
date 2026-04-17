@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
+import type { Part } from '@google/genai';
 import { buildAudioPart } from './_gemini-audio';
 
 export const config = {
@@ -63,14 +64,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ai = new GoogleGenAI({ apiKey });
 
   // ファイルサイズに応じて inlineData / Files API を選択
-  let audioPart: Awaited<ReturnType<typeof buildAudioPart>>[0];
-  let cleanup: () => Promise<void>;
+  let audioPart: Part;
+  let cleanup: () => Promise<void> = async () => {};
   try {
     [audioPart, cleanup] = await buildAudioPart(ai, audioBase64, mimeType);
   } catch (err) {
     console.error('[/api/analyze-audio] audio upload failed', err);
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return res.status(500).json({ error: message });
+    return res.status(500).json({ error: `音声の前処理に失敗しました: ${message}` });
   }
 
   const MAX_RETRIES = 3;
