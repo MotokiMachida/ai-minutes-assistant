@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
-import { buildAudioPart } from './lib/gemini-audio';
+import type { Part } from '@google/genai';
 
 // Increase body size limit — audio base64 can exceed Vercel's 1MB default
 export const config = {
@@ -10,6 +10,52 @@ export const config = {
     },
   },
 };
+
+function base64ByteSize(base64: string): number {
+  return Math.floor((base64.length * 3) / 4);
+}
+
+async function buildAudioPart(
+  ai: GoogleGenAI,
+  audioBase64: string,
+  mimeType: string,
+): Promise<[Part, () => Promise<void>]> {
+  const baseMime = mimeType.split(';')[0];
+  const rawBytes = base64ByteSize(audioBase64);
+  const INLINE_LIMIT = 10 * 1024 * 1024;
+
+  if (rawBytes < INLINE_LIMIT) {
+    const part: Part = { inlineData: { mimeType, data: audioBase64 } };
+    return [part, async () => {}];
+  }
+
+  console.info(`[transcribe] Large audio (${(rawBytes / 1024 / 1024).toFixed(1)} MB) — uploading via Files API`);
+
+  const buffer = Buffer.from(audioBase64, 'base64');
+  const blob = new Blob([buffer], { type: baseMime });
+
+  const uploadResult = await ai.files.upload({
+    file: blob,
+    config: { mimeType: baseMime },
+  });
+
+  if (!uploadResult.uri || !uploadResult.name) {
+    throw new Error('Files API upload failed: no uri/name returned');
+  }
+
+  const part: Part = { fileData: { mimeType: baseMime, fileUri: uploadResult.uri } };
+  const name = uploadResult.name;
+
+  const cleanup = async () => {
+    try {
+      await ai.files.delete({ name });
+    } catch (e) {
+      console.warn('[transcribe] Failed to delete uploaded file:', e);
+    }
+  };
+
+  return [part, cleanup];
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
