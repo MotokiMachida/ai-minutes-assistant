@@ -79,12 +79,34 @@ export async function analyzeAudioChunked(
     chunks.push(blob.slice(offset, offset + CHUNK_SIZE_BYTES));
   }
 
-  // 各チャンクを順次文字起こし
+  // 各チャンクを順次文字起こし（429 レート制限対策のディレイ＋リトライ付き）
+  const INTER_CHUNK_DELAY_MS = 1500; // チャンク間の固定ウェイト
+  const MAX_RETRIES = 3;
+
   const transcripts: string[] = [];
   for (let i = 0; i < chunks.length; i++) {
+    // 2チャンク目以降はディレイを挟む
+    if (i > 0) await new Promise((r) => setTimeout(r, INTER_CHUNK_DELAY_MS));
+
     onProgress?.(i + 1, chunks.length);
     const base64 = await blobToBase64(chunks[i]);
-    const text = await transcribeAudio(base64, mimeType);
+
+    // 429 が来た場合は指数バックオフでリトライ
+    let text = '';
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        text = await transcribeAudio(base64, mimeType);
+        break;
+      } catch (err) {
+        const is429 = err instanceof Error && err.message.includes('429');
+        if (is429 && attempt < MAX_RETRIES - 1) {
+          const delay = Math.pow(2, attempt + 1) * 1000; // 2s, 4s
+          await new Promise((r) => setTimeout(r, delay));
+          continue;
+        }
+        throw err;
+      }
+    }
     if (text.trim()) transcripts.push(text.trim());
   }
 
