@@ -31,7 +31,10 @@ interface AnalysisPanelProps {
 }
 
 export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetingInfo, onAudioTranscriptReady }: AnalysisPanelProps) {
-  const { result, audioTranscript, status, errorMessage, analyze, analyzeAudio, reset } = useAnalysis();
+  const { result, audioTranscript, status, errorMessage, chunkProgress, analyze, analyzeAudio, analyzeAudioChunked, reset } = useAnalysis();
+
+  // Vercel インフラの 4.5MB 上限に対するしきい値（3MB binary = 約 4MB base64）
+  const CHUNK_THRESHOLD = 3 * 1024 * 1024;
 
   // 音声モードの分析が完了したらトランスクリプト（空文字含む）を親へ通知
   useEffect(() => {
@@ -119,8 +122,12 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
       // → 手動編集を優先してテキストで分析
       analyze(transcriptText, title);
     } else if (mode === 'audio' && audioBlob) {
-      // 音声モードの初回分析（トランスクリプト未取得）→ 音声Blobを直接送信
-      analyzeAudio(audioBlob, title);
+      // 大容量ファイルはチャンク分割して送信（Vercel 4.5MB 上限回避）
+      if (audioBlob.size > CHUNK_THRESHOLD) {
+        analyzeAudioChunked(audioBlob, title);
+      } else {
+        analyzeAudio(audioBlob, title);
+      }
     }
   }, [mode, audioBlob, transcriptText, meetingInfo, analyze, analyzeAudio]);
 
@@ -213,19 +220,39 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
 
         {/* Loading skeleton */}
         {isLoading && (
-          <div className="space-y-4 animate-pulse">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="rounded-xl border border-gray-200 overflow-hidden">
-                <div className="px-4 py-3 bg-white flex items-center gap-2">
-                  <div className="w-4 h-4 bg-gray-200 rounded" />
-                  <div className="w-16 h-4 bg-gray-200 rounded" />
+          <div className="space-y-4">
+            {chunkProgress && (
+              <div className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-purple-700">
+                    音声を分割して文字起こし中…
+                  </span>
+                  <span className="text-xs text-purple-500">
+                    {chunkProgress.current} / {chunkProgress.total}
+                  </span>
                 </div>
-                <div className="px-4 py-3 bg-gray-50 space-y-2">
-                  <div className="h-3 bg-gray-200 rounded w-full" />
-                  <div className="h-3 bg-gray-200 rounded w-4/5" />
+                <div className="w-full bg-purple-100 rounded-full h-1.5">
+                  <div
+                    className="bg-purple-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${(chunkProgress.current / chunkProgress.total) * 100}%` }}
+                  />
                 </div>
               </div>
-            ))}
+            )}
+            <div className="animate-pulse space-y-4">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="rounded-xl border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-white flex items-center gap-2">
+                    <div className="w-4 h-4 bg-gray-200 rounded" />
+                    <div className="w-16 h-4 bg-gray-200 rounded" />
+                  </div>
+                  <div className="px-4 py-3 bg-gray-50 space-y-2">
+                    <div className="h-3 bg-gray-200 rounded w-full" />
+                    <div className="h-3 bg-gray-200 rounded w-4/5" />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

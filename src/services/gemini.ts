@@ -57,3 +57,41 @@ export async function analyzeAudio(blob: Blob, meetingTitle?: string): Promise<A
     meetingTitle: meetingTitle || undefined,
   });
 }
+
+// 3MB バイナリ = 約 4MB base64 — Vercel の 4.5MB インフラ上限に対して安全なマージンを確保
+const CHUNK_SIZE_BYTES = 3 * 1024 * 1024;
+
+/**
+ * 大容量音声をチャンク分割して文字起こし → テキスト結合 → 構造化分析。
+ * Vercel インフラの 4.5MB リクエスト上限を回避するために使用する。
+ * @param onProgress (current, total) — 1-indexed で現在処理中のチャンク番号を通知
+ */
+export async function analyzeAudioChunked(
+  blob: Blob,
+  meetingTitle?: string,
+  onProgress?: (current: number, total: number) => void,
+): Promise<AudioAnalysisResult> {
+  const mimeType = blob.type || 'audio/webm';
+
+  // チャンク分割
+  const chunks: Blob[] = [];
+  for (let offset = 0; offset < blob.size; offset += CHUNK_SIZE_BYTES) {
+    chunks.push(blob.slice(offset, offset + CHUNK_SIZE_BYTES));
+  }
+
+  // 各チャンクを順次文字起こし
+  const transcripts: string[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress?.(i + 1, chunks.length);
+    const base64 = await blobToBase64(chunks[i]);
+    const text = await transcribeAudio(base64, mimeType);
+    if (text.trim()) transcripts.push(text.trim());
+  }
+
+  const mergedTranscript = transcripts.join('\n');
+
+  // 結合テキストを構造化分析
+  const analysis = await analyzeTranscript(mergedTranscript, meetingTitle);
+
+  return { transcript: mergedTranscript, ...analysis };
+}
