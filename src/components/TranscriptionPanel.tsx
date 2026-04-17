@@ -12,6 +12,7 @@ import {
   Eye,
   Download,
   X,
+  FolderOpen,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
@@ -78,6 +79,7 @@ export function TranscriptionPanel({
   const audio = useAudioAnalysis();
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 音声モードのトランスクリプト編集状態
   const [editableTranscript, setEditableTranscript] = useState('');
@@ -175,6 +177,13 @@ export function TranscriptionPanel({
     }
   };
 
+  const handleFileLoad = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    audio.loadFile(file);
+    e.target.value = ''; // 同じファイルを再選択できるようリセット
+  };
+
   const handleDownload = (blob: Blob, index: number) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -212,6 +221,26 @@ export function TranscriptionPanel({
               <Trash2 className="w-3.5 h-3.5" />
               クリア
             </button>
+          )}
+
+          {/* 音声ファイル読み込みボタン（音声モード・非録音中のみ） */}
+          {mode === 'audio' && !audio.isRecording && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/webm,audio/mp3,audio/mp4,audio/wav,audio/ogg,audio/m4a,.webm,.mp3,.mp4,.wav,.ogg,.m4a"
+                className="hidden"
+                onChange={handleFileLoad}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                ファイル読み込み
+              </button>
+            </>
           )}
 
           {/* 録音ボタン */}

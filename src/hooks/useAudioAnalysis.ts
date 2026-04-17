@@ -17,6 +17,7 @@ export interface UseAudioAnalysisReturn {
   stopRecording: () => void;
   clearBlob: () => void;
   removeRecording: (id: string) => void;
+  loadFile: (file: File) => Promise<void>;
 }
 
 export function useAudioAnalysis(): UseAudioAnalysisReturn {
@@ -135,6 +136,35 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
     setRecordings([]);
   }, []);
 
+  const loadFile = useCallback(async (file: File) => {
+    setError(null);
+
+    // Audio 要素で再生時間を取得
+    let duration = 0;
+    try {
+      const url = URL.createObjectURL(file);
+      duration = await new Promise<number>((resolve) => {
+        const audio = new Audio(url);
+        audio.onloadedmetadata = () => {
+          resolve(Math.round(audio.duration) || 0);
+          URL.revokeObjectURL(url);
+        };
+        audio.onerror = () => {
+          resolve(0);
+          URL.revokeObjectURL(url);
+        };
+      });
+    } catch {
+      duration = 0;
+    }
+
+    const id = `file-${Date.now()}`;
+    const rec: Recording = { id, blob: file, duration };
+    setAudioBlob(file);
+    setAudioDuration(duration);
+    setRecordings((prev) => [...prev, rec]);
+  }, []);
+
   const removeRecording = useCallback((id: string) => {
     setRecordings((prev) => {
       const next = prev.filter((r) => r.id !== id);
@@ -171,5 +201,6 @@ export function useAudioAnalysis(): UseAudioAnalysisReturn {
     stopRecording,
     clearBlob,
     removeRecording,
+    loadFile,
   };
 }
