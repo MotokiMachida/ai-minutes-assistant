@@ -31,10 +31,10 @@ interface AnalysisPanelProps {
 }
 
 export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetingInfo, onAudioTranscriptReady }: AnalysisPanelProps) {
-  const { result, audioTranscript, status, errorMessage, chunkProgress, analyze, analyzeAudio, analyzeAudioChunked, reset } = useAnalysis();
+  const { result, audioTranscript, status, errorMessage, chunkProgress, uploadProgress, analyze, analyzeAudio, analyzeAudioLarge, reset } = useAnalysis();
 
-  // Vercel インフラの 4.5MB 上限に対するしきい値（3MB binary = 約 4MB base64）
-  const CHUNK_THRESHOLD = 3 * 1024 * 1024;
+  // Vercel Blob を使う閾値（4.5MB 超はサーバー経由不可なので Blob 経由）
+  const BLOB_THRESHOLD = 4 * 1024 * 1024;
 
   // 音声モードの分析が完了したらトランスクリプト（空文字含む）を親へ通知
   useEffect(() => {
@@ -122,14 +122,17 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
       // → 手動編集を優先してテキストで分析
       analyze(transcriptText, title);
     } else if (mode === 'audio' && audioBlob) {
-      // 大容量ファイルはチャンク分割して送信（Vercel 4.5MB 上限回避）
-      if (audioBlob.size > CHUNK_THRESHOLD) {
-        analyzeAudioChunked(audioBlob, title);
+      // Vercel Blob CDN はローカル開発環境からの CORS を許可しないため、
+      // localhost では常に base64 直接送信（ローカルサーバーは 50MB 制限）、
+      // Vercel デプロイ環境のみ大容量ファイルを Blob 経由で送信する
+      const isVercelDeployment = !['localhost', '127.0.0.1'].includes(window.location.hostname);
+      if (isVercelDeployment && audioBlob.size > BLOB_THRESHOLD) {
+        analyzeAudioLarge(audioBlob, title);
       } else {
         analyzeAudio(audioBlob, title);
       }
     }
-  }, [mode, audioBlob, transcriptText, meetingInfo, analyze, analyzeAudio]);
+  }, [mode, audioBlob, transcriptText, meetingInfo, analyze, analyzeAudio, analyzeAudioLarge]);
 
   const handleReset = useCallback(() => {
     reset();
@@ -221,6 +224,24 @@ export function AnalysisPanel({ transcriptText, audioBlob, mode = 'text', meetin
         {/* Loading skeleton */}
         {isLoading && (
           <div className="space-y-4">
+            {uploadProgress && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-blue-700">
+                    音声ファイルをアップロード中…
+                  </span>
+                  <span className="text-xs text-blue-500">
+                    {Math.round((uploadProgress.loaded / uploadProgress.total) * 100)}%
+                  </span>
+                </div>
+                <div className="w-full bg-blue-100 rounded-full h-1.5">
+                  <div
+                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${(uploadProgress.loaded / uploadProgress.total) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
             {chunkProgress && (
               <div className="rounded-xl border border-purple-200 bg-purple-50 px-4 py-3">
                 <div className="flex items-center justify-between mb-2">
