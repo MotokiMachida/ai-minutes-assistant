@@ -96,9 +96,7 @@ export function useAnalysis(): UseAnalysisReturn {
     setErrorMessage(null);
     setUploadProgress(null);
     try {
-      const data = await analyzeAudioLargeService(blob, meetingTitle, (loaded, total) => {
-        setUploadProgress({ loaded, total });
-      });
+      const data = await analyzeAudioLargeService(blob, meetingTitle);
       setUploadProgress(null);
       setAudioTranscript(data.transcript ?? '');
       setResult(data);
