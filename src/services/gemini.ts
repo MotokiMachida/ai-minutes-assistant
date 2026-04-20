@@ -68,7 +68,6 @@ export async function analyzeAudio(blob: Blob, meetingTitle?: string): Promise<A
 export async function analyzeAudioLarge(
   blob: Blob,
   meetingTitle?: string,
-  onProgress?: (loaded: number, total: number) => void,
 ): Promise<AudioAnalysisResult> {
   const { put } = await import('@vercel/blob/client');
   const ext = (blob.type.split('/')[1] ?? 'webm').split(';')[0];
