@@ -78,13 +78,10 @@ export async function analyzeAudioLarge(
   const { clientToken } = await apiPost<{ clientToken: string }>('/api/blob-upload', { pathname: filename });
 
   // Step 2: トークンを使って Vercel Blob CDN へ直接アップロード
+  // multipart: true は vercel.com/api/blob/mpu 経由になり CORS でブロックされるため使わない
   const uploaded = await put(filename, blob, {
     access: 'public',
     token: clientToken,
-    multipart: true,
-    onUploadProgress: onProgress
-      ? ({ loaded, total }: { loaded: number; total: number }) => onProgress(loaded, total)
-      : undefined,
   });
 
   // Step 3: blobUrl をサーバーに渡して Gemini で分析
