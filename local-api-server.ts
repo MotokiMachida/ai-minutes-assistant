@@ -8,6 +8,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import generateHandler from './api/generate.js';
 import analyzeAudioHandler from './api/analyze-audio.js';
 import transcribeHandler from './api/transcribe.js';
+import blobUploadHandler from './api/blob-upload.js';
 
 // .env.local を手動ロード（handler が process.env を参照するより前に実行）
 try {
@@ -18,7 +19,13 @@ try {
     const eqIdx = trimmed.indexOf('=');
     if (eqIdx > 0) {
       const key = trimmed.slice(0, eqIdx).trim();
-      const value = trimmed.slice(eqIdx + 1).trim();
+      let value = trimmed.slice(eqIdx + 1).trim();
+      // Strip surrounding double or single quotes (Vercel CLI wraps values in quotes)
+      if (value.length >= 2 &&
+          ((value.startsWith('"') && value.endsWith('"')) ||
+           (value.startsWith("'") && value.endsWith("'")))) {
+        value = value.slice(1, -1);
+      }
       if (!process.env[key]) process.env[key] = value;
     }
   }
@@ -39,6 +46,10 @@ app.post('/api/analyze-audio', (req, res) => {
 
 app.post('/api/transcribe', (req, res) => {
   transcribeHandler(req as unknown as VercelRequest, res as unknown as VercelResponse);
+});
+
+app.post('/api/blob-upload', (req, res) => {
+  blobUploadHandler(req as unknown as VercelRequest, res as unknown as VercelResponse);
 });
 
 const PORT = 3001;

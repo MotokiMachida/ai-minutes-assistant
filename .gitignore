@@ -49,3 +49,4 @@ ehthumbs.db
 er.email
 .vercel
 ai-minutes-assistant_音声版指示内容.md
+.env*.local

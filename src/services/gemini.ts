@@ -50,9 +50,46 @@ export interface AudioAnalysisResult extends AnalysisResult {
 }
 
 export async function analyzeAudio(blob: Blob, meetingTitle?: string): Promise<AudioAnalysisResult> {
+  console.info('[analyzeAudio] blob.type:', blob.type, '| size:', blob.size);
   const audioBase64 = await blobToBase64(blob);
   return apiPost<AudioAnalysisResult>('/api/analyze-audio', {
     audioBase64,
+    mimeType: blob.type || 'audio/webm',
+    meetingTitle: meetingTitle || undefined,
+  });
+}
+
+/**
+ * 大容量音声を Vercel Blob 経由で送信して分析する。
+ * クライアントがブラウザから直接 Vercel Blob CDN にアップロードするため
+ * Vercel の 4.5MB インフラ上限を回避できる。
+ * サーバー側は Blob URL を受け取り Gemini Files API に転送する（API 呼び出し 1 回）。
+ */
+export async function analyzeAudioLarge(
+  blob: Blob,
+  meetingTitle?: string,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<AudioAnalysisResult> {
+  const { put } = await import('@vercel/blob/client');
+  const ext = (blob.type.split('/')[1] ?? 'webm').split(';')[0];
+  const filename = `audio-${Date.now()}.${ext}`;
+
+  // Step 1: サーバーからクライアントトークンを取得
+  const { clientToken } = await apiPost<{ clientToken: string }>('/api/blob-upload', { pathname: filename });
+
+  // Step 2: トークンを使って Vercel Blob CDN へ直接アップロード
+  const uploaded = await put(filename, blob, {
+    access: 'public',
+    token: clientToken,
+    multipart: true,
+    onUploadProgress: onProgress
+      ? ({ loaded, total }: { loaded: number; total: number }) => onProgress(loaded, total)
+      : undefined,
+  });
+
+  // Step 3: blobUrl をサーバーに渡して Gemini で分析
+  return apiPost<AudioAnalysisResult>('/api/analyze-audio', {
+    blobUrl: uploaded.url,
     mimeType: blob.type || 'audio/webm',
     meetingTitle: meetingTitle || undefined,
   });

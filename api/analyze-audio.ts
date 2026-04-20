@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { GoogleGenAI } from '@google/genai';
 import type { Part } from '@google/genai';
+import { del } from '@vercel/blob';
 
 export const config = {
   api: {
@@ -112,10 +113,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { audioBase64, mimeType, meetingTitle } = req.body as { audioBase64?: string; mimeType?: string; meetingTitle?: string };
-  if (!audioBase64 || !mimeType) {
-    return res.status(400).json({ error: 'audioBase64 and mimeType are required' });
+  const { audioBase64, blobUrl, mimeType, meetingTitle } = req.body as {
+    audioBase64?: string;
+    blobUrl?: string;
+    mimeType?: string;
+    meetingTitle?: string;
+  };
+
+  if (!mimeType) {
+    return res.status(400).json({ error: 'mimeType is required' });
   }
+  if (!audioBase64 && !blobUrl) {
+    return res.status(400).json({ error: 'audioBase64 or blobUrl is required' });
+  }
+
+  // ブラウザが .webm/.mp4 等を "video/*" と判定することがある。
+  // Gemini に音声として処理させるため video/* → audio/* に正規化する。
+  // video→audio 変換時は codec 情報を除去（vp8 等のビデオ codec が残ると誤解釈される）。
+  const normalizedMimeType = mimeType.startsWith('video/')
+    ? 'audio/' + mimeType.split('/')[1].split(';')[0]
+    : mimeType;
+  console.info(`[analyze-audio] mimeType: ${mimeType} → normalized: ${normalizedMimeType}`);
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -126,10 +144,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let audioPart: Part;
   let cleanup: () => Promise<void> = async () => {};
+
   try {
-    [audioPart, cleanup] = await buildAudioPart(ai, audioBase64, mimeType);
+    if (blobUrl) {
+      // Vercel Blob → Gemini Files API (大容量ファイル用: CDN 経由で受け取りサイズ制限を回避)
+      console.info('[analyze-audio] Fetching audio from Vercel Blob:', blobUrl);
+      const blobRes = await fetch(blobUrl);
+      if (!blobRes.ok) {
+        throw new Error(`Failed to fetch blob: ${blobRes.status}`);
+      }
+      const arrayBuffer = await blobRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      const baseMime = normalizedMimeType.split(';')[0];
+      const sizeBytes = buffer.byteLength;
+
+      console.info(`[analyze-audio] Blob fetched (${(sizeBytes / 1024 / 1024).toFixed(1)} MB) — uploading to Gemini Files API`);
+      const fileBlob = new Blob([buffer], { type: baseMime });
+      const uploadResult = await ai.files.upload({
+        file: fileBlob,
+        config: { mimeType: baseMime },
+      });
+
+      if (!uploadResult.uri || !uploadResult.name) {
+        throw new Error('Files API upload failed: no uri/name returned');
+      }
+
+      audioPart = { fileData: { mimeType: baseMime, fileUri: uploadResult.uri } };
+      const geminiName = uploadResult.name;
+
+      cleanup = async () => {
+        // Gemini ファイルと Vercel Blob の両方をクリーンアップ
+        await Promise.allSettled([
+          ai.files.delete({ name: geminiName }).catch((e) =>
+            console.warn('[analyze-audio] Gemini file delete failed:', e),
+          ),
+          del(blobUrl).catch((e) =>
+            console.warn('[analyze-audio] Blob delete failed:', e),
+          ),
+        ]);
+      };
+    } else {
+      [audioPart, cleanup] = await buildAudioPart(ai, audioBase64!, normalizedMimeType);
+    }
   } catch (err) {
     console.error('[/api/analyze-audio] audio upload failed', err);
+    // blobUrl は失敗時もクリーンアップ
+    if (blobUrl) {
+      del(blobUrl).catch(() => {});
+    }
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ error: `音声の前処理に失敗しました: ${message}` });
   }
